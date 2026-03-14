@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.*.local
+backend/.env
+!backend/.env.example
+!frontend/.env.local.example
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.pnpm-store/
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+
+# Docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Infrastructure — never commit real parameter values
+infra/*.generated.bicepparam
+infra/*.local.bicepparam
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.*.backup
+*.tfvars
+!infra/terraform/terraform.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+# .terraform.lock.hcl pins provider versions and SHOULD be committed
+# Bootstrap local state — never commit (contains storage account name)
+infra/terraform/bootstrap/.terraform/
+infra/terraform/bootstrap/terraform.tfstate
+infra/terraform/bootstrap/terraform.tfstate.backup

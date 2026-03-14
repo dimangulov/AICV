@@ -1,0 +1,20 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.4
+python-dotenv==1.0.1
+httpx==0.28.1
+
+# LangChain ecosystem
+langchain==0.3.13
+langchain-core==0.3.28
+langchain-community==0.3.13
+langchain-ollama==0.2.3       # local dev  (LLM_PROVIDER=ollama)
+langchain-openai==0.3.7       # cloud deploy (LLM_PROVIDER=azure_openai)
+langchain-text-splitters==0.3.4
+
+# Qdrant vector database client
+qdrant-client==1.12.1
+
+# Azure authentication — Managed Identity / DefaultAzureCredential
+# Required on Container Apps for keyless Azure OpenAI calls (no API key stored).
+azure-identity==1.19.0

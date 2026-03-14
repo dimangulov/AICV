@@ -1,0 +1,173 @@
+name: Deploy to Azure
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Backend image tag (default: git SHA)'
+        required: false
+        default: ''
+
+# ── Permissions for OIDC login (no stored service-principal secret needed) ───
+permissions:
+  id-token: write   # Required for OIDC federated credential
+  contents: read
+
+# ── Shared ARM OIDC env vars ─────────────────────────────────────────────────
+env:
+  ARM_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_USE_OIDC:        "true"
+
+jobs:
+  # ── Job 1: Terraform — provision / update Azure infrastructure ──────────────
+  terraform-infra:
+    name: Terraform Apply
+    runs-on: ubuntu-24.04
+    environment: production
+
+    outputs:
+      acr_login_server:    ${{ steps.tf_out.outputs.acr_login_server }}
+      acr_name:            ${{ steps.tf_out.outputs.acr_name }}
+      container_app_name:  ${{ steps.tf_out.outputs.container_app_name }}
+      resource_group_name: ${{ steps.tf_out.outputs.resource_group_name }}
+      backend_url:         ${{ steps.tf_out.outputs.backend_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+          terraform_wrapper: false   # Allows clean capture of terraform output values
+
+      # Remote state: pass storage account details via GitHub vars
+      # (set TF_STATE_STORAGE_ACCOUNT and TF_STATE_RESOURCE_GROUP as repository variables)
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="storage_account_name=${{ secrets.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="resource_group_name=rg-aicv-tfstate" \
+            -reconfigure
+        working-directory: infra/terraform
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: infra/terraform
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -input=false
+        working-directory: infra/terraform
+        env:
+          # Sensitive variables injected directly — never stored in tfvars files
+          TF_VAR_qdrant_cloud_url:     ${{ secrets.QDRANT_CLOUD_URL }}
+          TF_VAR_qdrant_cloud_api_key: ${{ secrets.QDRANT_CLOUD_API_KEY }}
+          TF_VAR_live_avatar_api_key:  ${{ secrets.LIVEAVATAR_API_KEY }}
+          # Leave azure_openai_api_key empty → uses Managed Identity on Container Apps
+          TF_VAR_azure_openai_api_key: ""
+          TF_VAR_backend_image_tag:    ${{ github.event.inputs.image_tag || github.sha }}
+
+      - name: Capture Terraform outputs
+        id: tf_out
+        run: |
+          echo "acr_login_server=$(terraform output -raw acr_login_server)"   >> "$GITHUB_OUTPUT"
+          echo "acr_name=$(terraform output -raw acr_name)"                   >> "$GITHUB_OUTPUT"
+          echo "container_app_name=$(terraform output -raw container_app_name)" >> "$GITHUB_OUTPUT"
+          echo "resource_group_name=$(terraform output -raw resource_group_name)" >> "$GITHUB_OUTPUT"
+          echo "backend_url=$(terraform output -raw backend_url)"             >> "$GITHUB_OUTPUT"
+        working-directory: infra/terraform
+
+  # ── Job 2: Build & push backend Docker image to ACR ──────────────────────
+  build-backend:
+    name: Build & Push Backend
+    runs-on: ubuntu-24.04
+    environment: production
+    needs: terraform-infra
+
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.image_tag }}"
+          echo "tag=${TAG:-${{ github.sha }}}" >> "$GITHUB_OUTPUT"
+
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to Azure Container Registry
+        run: az acr login --name ${{ needs.terraform-infra.outputs.acr_name }}
+
+      - name: Build and push backend image
+        env:
+          IMAGE: ${{ needs.terraform-infra.outputs.acr_login_server }}/aicv-backend
+        run: |
+          docker build \
+            -t "$IMAGE:${{ steps.tag.outputs.tag }}" \
+            -t "$IMAGE:latest" \
+            ./backend
+
+          docker push "$IMAGE:${{ steps.tag.outputs.tag }}"
+          docker push "$IMAGE:latest"
+
+  # ── Job 3: Update Container App with the new image ────────────────────────
+  deploy-backend:
+    name: Deploy Backend
+    runs-on: ubuntu-24.04
+    environment: production
+    needs: [terraform-infra, build-backend]
+
+    steps:
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Update Container App image
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          containerAppName: ${{ needs.terraform-infra.outputs.container_app_name }}
+          resourceGroup:    ${{ needs.terraform-infra.outputs.resource_group_name }}
+          imageToDeploy: |
+            ${{ needs.terraform-infra.outputs.acr_login_server }}/aicv-backend:${{ needs.build-backend.outputs.image_tag }}
+
+  # ── Job 4: Deploy Next.js static export to Azure Static Web Apps ──────────
+  deploy-frontend:
+    name: Deploy Frontend
+    runs-on: ubuntu-24.04
+    environment: production
+    needs: [terraform-infra, deploy-backend]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token:   ${{ secrets.GITHUB_TOKEN }}
+          action:       upload
+          app_location: frontend
+          api_location: ''
+          output_location: out
+        env:
+          NEXT_PUBLIC_API_URL:    ${{ needs.terraform-infra.outputs.backend_url }}
+          NEXT_OUTPUT:            export
+          NEXT_TELEMETRY_DISABLED: 1
+          PRE_BUILD_COMMAND:      npm i -g pnpm

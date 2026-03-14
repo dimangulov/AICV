@@ -1,0 +1,18 @@
+# Copy to terraform.tfvars (gitignored) and fill in values.
+# Sensitive values should be passed as TF_VAR_* environment variables in CI
+# and never stored in any tfvars file committed to source control.
+
+environment_suffix    = "prod"
+resource_group_name   = "rg-aicv-prod"
+location              = "westeurope"
+openai_location       = "swedencentral"
+backend_image_tag     = "latest"
+live_avatar_avatar_id = "default"
+
+# ── Sensitive variables ────────────────────────────────────────────────────────
+# Uncomment for local testing only. In CI, inject as TF_VAR_* secrets instead.
+
+# qdrant_cloud_url     = "https://your-cluster.azure.qdrant.io:6333"
+# qdrant_cloud_api_key = "your-qdrant-api-key"
+# azure_openai_api_key = ""   # empty = Managed Identity (recommended on Container Apps)
+# live_avatar_api_key  = ""   # empty = canvas mock avatar
