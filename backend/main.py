@@ -12,16 +12,27 @@ Implements a Retrieval-Augmented Generation (RAG) pipeline using:
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+try:
+    from gtts import gTTS as _gTTS
+    _GTTS_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _GTTS_AVAILABLE = False
+
 import httpx
+import miniaudio
+import websockets
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Qdrant as QdrantVectorStore
@@ -79,6 +90,13 @@ LIVEAVATAR_API_KEY: str = os.getenv("LIVEAVATAR_API_KEY", "")
 LIVEAVATAR_AVATAR_ID: str = os.getenv("LIVEAVATAR_AVATAR_ID", "default")
 LIVEAVATAR_SESSION_MODE: str = os.getenv("LIVEAVATAR_SESSION_MODE", "LITE")
 LIVEAVATAR_IS_SANDBOX: bool = os.getenv("LIVEAVATAR_IS_SANDBOX", "false").lower() == "true"
+LIVEAVATAR_VOICE: str = os.getenv("LIVEAVATAR_VOICE", "en-US-GuyNeural")
+
+# ── Azure Cognitive Services Speech (TTS for LiveAvatar) ──────────────────────
+# Official REST API — same voices as Edge TTS, no unofficial WebSocket hacks.
+# Free tier: 500 000 chars/month. Falls back to gTTS when key is not set.
+AZURE_SPEECH_KEY: str = os.getenv("AZURE_SPEECH_KEY", "")
+AZURE_SPEECH_REGION: str = os.getenv("AZURE_SPEECH_REGION", "westeurope")
 
 BIO_FILE_PATH: Path = Path(__file__).parent / "bio.txt"
 COLLECTION_NAME: str = "cv_knowledge_base"
@@ -393,7 +411,7 @@ app.add_middleware(
     response_model=AskResponse,
     summary="Ask a question about the candidate",
 )
-async def ask(payload: AskRequest) -> AskResponse:
+async def ask(payload: AskRequest, background_tasks: BackgroundTasks) -> AskResponse:
     """
     Accepts a natural-language question, runs the RAG pipeline (retrieve → prompt →
     LLM), and returns a grounded answer sourced from bio.txt.
@@ -412,6 +430,8 @@ async def ask(payload: AskRequest) -> AskResponse:
         answer: str = _rag_chain.invoke(payload.question)
         elapsed_ms = int((time.monotonic() - start) * 1000)
         logger.info("Question answered in %dms: %r", elapsed_ms, payload.question[:60])
+        if LIVEAVATAR_API_KEY:
+            background_tasks.add_task(_speak_on_avatar, answer)
         return AskResponse(
             answer=answer,
             sources=[str(BIO_FILE_PATH)],
@@ -426,15 +446,227 @@ async def ask(payload: AskRequest) -> AskResponse:
 
 
 # ---------------------------------------------------------------------------
-# LiveAvatar session cache
+# LiveAvatar TTS helpers
+# ---------------------------------------------------------------------------
+
+def _mp3_to_pcm(mp3_bytes: bytes) -> bytes:
+    """Decode MP3 to raw PCM (16-bit signed LE, mono, 24 kHz) via miniaudio."""
+    decoded = miniaudio.mp3_read_s16(mp3_bytes, want_nchannels=1, want_sample_rate=24000)
+    return bytes(decoded.samples)
+
+
+async def _synthesize_pcm_azure(text: str) -> bytes:
+    """
+    Azure Cognitive Services Speech TTS → MP3 → PCM.
+    Official REST API: same voice catalogue as Edge TTS, no unofficial WS.
+    """
+    ssml = (
+        f"<speak version='1.0' xml:lang='en-US'>"
+        f"<voice name='{LIVEAVATAR_VOICE}'>{text}</voice>"
+        f"</speak>"
+    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1",
+            headers={
+                "Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY,
+                "Content-Type": "application/ssml+xml",
+                "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3",
+                "User-Agent": "aicv-backend",
+            },
+            content=ssml.encode(),
+        )
+        response.raise_for_status()
+    return _mp3_to_pcm(response.content)
+
+
+async def _synthesize_pcm_gtts(text: str) -> bytes:
+    """
+    Google TTS fallback → MP3 → PCM.
+    Used when AZURE_SPEECH_KEY is not configured (local dev).
+    """
+    import io
+    loop = asyncio.get_event_loop()
+    buf = io.BytesIO()
+
+    def _synth() -> None:
+        _gTTS(text=text, lang="en").write_to_fp(buf)
+        buf.seek(0)
+
+    await loop.run_in_executor(None, _synth)
+    return _mp3_to_pcm(buf.read())
+
+
+async def _synthesize_pcm(text: str) -> bytes:
+    """
+    Convert text to raw PCM bytes (16-bit signed, mono, 24 kHz).
+    Uses Azure Cognitive Services Speech when AZURE_SPEECH_KEY is set,
+    otherwise falls back to gTTS (Google TTS) for local development.
+    """
+    if AZURE_SPEECH_KEY:
+        logger.debug("[tts] Using Azure Speech (region=%s, voice=%s)", AZURE_SPEECH_REGION, LIVEAVATAR_VOICE)
+        return await _synthesize_pcm_azure(text)
+
+    if _GTTS_AVAILABLE:
+        logger.debug("[tts] AZURE_SPEECH_KEY not set — using gTTS fallback")
+        return await _synthesize_pcm_gtts(text)
+
+    raise RuntimeError(
+        "No TTS backend available. Set AZURE_SPEECH_KEY or install gTTS."
+    )
+
+
+async def _speak_on_avatar(text: str) -> None:
+    """
+    Synthesize text via TTS and stream PCM audio to the active LiveAvatar
+    session WebSocket (LITE mode agent.speak protocol).
+
+    Performance optimisations vs. the previous implementation:
+    - TTS synthesis and session acquisition run in PARALLEL via asyncio.gather,
+      saving the full TTS round-trip (~300–800 ms) from the critical path.
+    - Audio is sent over the PERSISTENT _speak_ws connection established by
+      _avatar_ws_loop, eliminating the per-call TCP/TLS handshake (~200–500 ms)
+      and the 5-second session.state_updated wait.
+    """
+    if not LIVEAVATAR_API_KEY:
+        logger.debug("[speak] No LIVEAVATAR_API_KEY — skipping avatar speech")
+        return
+
+    # Run TTS synthesis and session acquisition concurrently — they are independent.
+    try:
+        pcm_bytes, session = await asyncio.gather(
+            _synthesize_pcm(text),
+            _get_or_create_liveavatar_session(),
+        )
+    except Exception as exc:
+        logger.error("[speak] Parallel TTS/session setup failed: %s", exc)
+        return
+
+    ws = _speak_ws
+    if ws is None:
+        logger.warning("[speak] Persistent WebSocket not yet ready — waiting up to 3 s")
+        # The _avatar_ws_loop task may still be connecting; give it a moment.
+        for _ in range(6):
+            await asyncio.sleep(0.5)
+            ws = _speak_ws
+            if ws is not None:
+                break
+        if ws is None:
+            logger.error("[speak] Persistent WebSocket unavailable after wait — dropping speak")
+            return
+
+    # LiveAvatar expects ~1 second chunks: 24000 samples × 2 bytes = 48 000 bytes
+    CHUNK_SIZE = 48_000
+    event_id = str(uuid.uuid4())
+
+    # Serialise concurrent speak calls so chunks from two responses don't interleave.
+    async with _speak_lock:
+        try:
+            for i in range(0, len(pcm_bytes), CHUNK_SIZE):
+                chunk = pcm_bytes[i : i + CHUNK_SIZE]
+                await ws.send(json.dumps({
+                    "type": "agent.speak",
+                    "event_id": event_id,
+                    "audio": base64.b64encode(chunk).decode(),
+                }))
+            await ws.send(json.dumps({
+                "type": "agent.speak_end",
+                "event_id": event_id,
+            }))
+            logger.info("[speak] Avatar speak complete for session %s", session["session_id"])
+        except Exception as exc:
+            logger.error("[speak] Avatar WebSocket error: %s", exc)
+            _invalidate_session(f"speak WS error: {exc}")
+
+
+class SpeakRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=5000)
+
+
+@app.post("/speak", summary="Make the avatar speak arbitrary text")
+async def speak(payload: SpeakRequest, background_tasks: BackgroundTasks) -> dict[str, str]:
+    """
+    Queues a TTS + WebSocket send to the active LiveAvatar session.
+    Used by the frontend to play the intro greeting on avatar connect.
+    Returns immediately; speaking happens in the background.
+    """
+    if not LIVEAVATAR_API_KEY:
+        return {"status": "mock"}
+    background_tasks.add_task(_speak_on_avatar, payload.text)
+    return {"status": "queued"}
+
+
+# ---------------------------------------------------------------------------
+# LiveAvatar session cache + persistent WebSocket
 # A single avatar session is shared across all visitors and reused until it
-# expires or the server restarts.  The cache is invalidated on 401/403 so a
-# fresh session is transparently obtained on the next request.
+# expires, is invalidated on auth errors, or is detected as stopped by the
+# service via a WebSocket session.stopped event.
+#
+# _speak_ws holds the ONE persistent WebSocket connection used by both the
+# keep-alive heartbeat and all agent.speak calls, eliminating the per-call
+# TCP/TLS connect latency (~200–500 ms) and the 5-second state-event wait.
 # ---------------------------------------------------------------------------
 _liveavatar_session: dict[str, Any] | None = None
 _liveavatar_session_expires: float = 0.0          # monotonic time
 _liveavatar_session_lock: asyncio.Lock = asyncio.Lock()
 _LIVEAVATAR_SESSION_TTL: float = 1800.0           # 30 min conservative TTL
+_avatar_ws_task: asyncio.Task | None = None       # background WS loop
+_speak_ws: Any | None = None                      # persistent websockets connection
+_speak_lock: asyncio.Lock = asyncio.Lock()        # serialise concurrent speak calls
+
+
+def _invalidate_session(reason: str) -> None:
+    """Clear the cached session and persistent WS so the next request starts fresh."""
+    global _liveavatar_session, _liveavatar_session_expires, _speak_ws
+    if _liveavatar_session:
+        logger.info("[session] Cache invalidated: %s", reason)
+    _liveavatar_session = None
+    _liveavatar_session_expires = 0.0
+    _speak_ws = None
+
+
+async def _avatar_ws_loop(ws_url: str, session_id: str) -> None:
+    """
+    Maintains ONE persistent WebSocket for the lifetime of the avatar session.
+    Serves two purposes:
+      1. Keep-alive — sends session.keep_alive every 3 minutes.
+      2. Speak channel — _speak_on_avatar reuses _speak_ws to send agent.speak
+         frames without opening a new connection per call.
+    """
+    global _speak_ws
+    logger.info("[avatar_ws] Connecting persistent WebSocket for session %s", session_id)
+    try:
+        async with websockets.connect(ws_url) as ws:
+            _speak_ws = ws
+            logger.info("[avatar_ws] Persistent WebSocket ready")
+            while True:
+                try:
+                    # Wait up to 3 minutes for an inbound event before sending keep-alive
+                    async with asyncio.timeout(180):
+                        raw = await ws.recv()
+                        msg = json.loads(raw)
+                        event_type = msg.get("type", "")
+                        logger.debug("[avatar_ws] event: %s", event_type)
+                        if event_type == "session.stopped":
+                            logger.info(
+                                "[avatar_ws] Session %s stopped (%s) — invalidating cache",
+                                session_id,
+                                msg.get("data", {}).get("end_reason", "unknown"),
+                            )
+                            _invalidate_session("session.stopped received")
+                            return
+                except TimeoutError:
+                    # No event in 3 min → send keep-alive
+                    await ws.send(json.dumps({
+                        "type": "session.keep_alive",
+                        "event_id": str(uuid.uuid4()),
+                    }))
+                    logger.debug("[avatar_ws] keep-alive sent for session %s", session_id)
+    except Exception as exc:
+        logger.warning("[avatar_ws] WebSocket closed for session %s: %s", session_id, exc)
+        _invalidate_session(f"WebSocket closed: {exc}")
+    finally:
+        _speak_ws = None
 
 
 async def _get_or_create_liveavatar_session() -> dict[str, Any]:
@@ -494,9 +726,25 @@ async def _get_or_create_liveavatar_session() -> dict[str, Any]:
             "session_id": start_data.get("session_id") or session_id,
             "livekit_url": start_data["livekit_url"],
             "livekit_client_token": start_data["livekit_client_token"],
+            "ws_url": start_data.get("ws_url") or "",
         }
+        logger.info(
+            "LiveAvatar session cached — session_id=%s ws_url=%s",
+            result["session_id"],
+            result["ws_url"] or "<empty — LITE ws_url not returned>",
+        )
         _liveavatar_session = result
         _liveavatar_session_expires = now + _LIVEAVATAR_SESSION_TTL
+
+        # Start persistent WS loop in the background if ws_url is available
+        if result["ws_url"]:
+            global _avatar_ws_task
+            if _avatar_ws_task and not _avatar_ws_task.done():
+                _avatar_ws_task.cancel()
+            _avatar_ws_task = asyncio.create_task(
+                _avatar_ws_loop(result["ws_url"], result["session_id"])
+            )
+
         return result
 
 
@@ -529,9 +777,7 @@ async def get_session() -> dict[str, Any]:
     except httpx.HTTPStatusError as exc:
         # Invalidate cache on auth errors so the next request retries cleanly
         if exc.response.status_code in (401, 403):
-            global _liveavatar_session, _liveavatar_session_expires
-            _liveavatar_session = None
-            _liveavatar_session_expires = 0.0
+            _invalidate_session(f"HTTP {exc.response.status_code} from LiveAvatar")
         logger.error(
             "LiveAvatar API returned %d: %s",
             exc.response.status_code,

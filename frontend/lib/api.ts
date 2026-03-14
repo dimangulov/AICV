@@ -45,6 +45,19 @@ export async function getSession(): Promise<SessionResponse> {
 }
 
 /**
+ * POST /speak
+ * Queues TTS synthesis and sends the audio to the active LiveAvatar session.
+ */
+export async function speakText(text: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/speak`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  await handleResponse<{ status: string }>(res);
+}
+
+/**
  * GET /health
  * Returns the backend health status object.
  */

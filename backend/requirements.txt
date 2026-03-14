@@ -18,3 +18,10 @@ qdrant-client==1.12.1
 # Azure authentication — Managed Identity / DefaultAzureCredential
 # Required on Container Apps for keyless Azure OpenAI calls (no API key stored).
 azure-identity==1.19.0
+
+# LiveAvatar TTS pipeline (LITE mode)
+gTTS==2.5.3                  # Google TTS fallback — no credentials needed for local dev
+miniaudio==1.2               # MP3 → PCM 16-bit 24KHz, no ffmpeg required
+websockets==13.1             # WebSocket client for LiveAvatar LITE audio stream
+# Azure Cognitive Services Speech (set AZURE_SPEECH_KEY for production TTS)
+# No extra package needed — uses httpx REST API (already a dependency)

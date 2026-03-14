@@ -5,14 +5,6 @@ import { Room, RoomEvent, Track } from "livekit-client";
 import { Loader2, Play, VideoOff, AlertTriangle, Wifi, WifiOff } from "lucide-react";
 import { getSession } from "@/lib/api";
 
-const AVATAR_INTRO =
-  "Meet Damir Imangulov. He is a Senior Full-Stack Engineer with a deep-seated focus on " +
-  "cloud-native solution design. Damir doesn't just write code; he builds scalable ecosystems. " +
-  "By architecting robust backends in .NET and Python and crafting seamless frontends, he bridges " +
-  "the gap between complex infrastructure and the end-user. Whether it's optimizing a cloud " +
-  "environment for high availability or designing a sleek, reactive UI, Damir's goal is to ensure " +
-  "that technical complexity never gets in the way of a great user experience.";
-
 type ConnectionStatus =
   | "idle"
   | "fetching-session"
@@ -22,14 +14,14 @@ type ConnectionStatus =
 
 interface VideoPlayerProps {
   onLog?: (message: string, level?: "info" | "success" | "error") => void;
-  /** Called once the room is live; receives a function to make the avatar speak. */
-  onSpeakReady?: (speak: (text: string) => void) => void;
+  /** Called once the LiveKit room is live and the avatar is ready. */
+  onConnected?: () => void;
 }
 
-export default function VideoPlayer({ onLog, onSpeakReady }: VideoPlayerProps) {
+export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const roomRef = useRef<Room | null>(null);
-  const sessionIdRef = useRef<string>("");
   const canvasCleanupRef = useRef<(() => void) | null>(null);
 
   const [status, setStatus] = useState<ConnectionStatus>("idle");
@@ -41,20 +33,6 @@ export default function VideoPlayer({ onLog, onSpeakReady }: VideoPlayerProps) {
     },
     [onLog],
   );
-
-  /** Sends avatar.speak_text via LiveKit data channel (FULL mode). No-op in mock mode. */
-  const speakText = useCallback((text: string) => {
-    const room = roomRef.current;
-    if (!room || !sessionIdRef.current) return;
-    const payload = JSON.stringify({
-      event_type: "avatar.speak_text",
-      session_id: sessionIdRef.current,
-      text,
-    });
-    room.localParticipant
-      .publishData(new TextEncoder().encode(payload), { topic: "agent-control" })
-      .catch((e: unknown) => log(`[Avatar] speak publish error: ${e}`, "error"));
-  }, [log]);
 
   const connect = useCallback(async () => {
     // Tear down any previous LiveKit room
@@ -90,7 +68,6 @@ export default function VideoPlayer({ onLog, onSpeakReady }: VideoPlayerProps) {
       // Connect to LiveAvatar's hosted LiveKit room
       const room = new Room();
       roomRef.current = room;
-      sessionIdRef.current = session.session_id;
 
       room.on(RoomEvent.TrackSubscribed, (track) => {
         if (track.kind === Track.Kind.Video && videoRef.current) {
@@ -101,12 +78,18 @@ export default function VideoPlayer({ onLog, onSpeakReady }: VideoPlayerProps) {
           setStatus("connected");
           log("[Avatar] Live stream connected!", "success");
         }
+        if (track.kind === Track.Kind.Audio && audioRef.current) {
+          track.attach(audioRef.current);
+          audioRef.current
+            .play()
+            .catch((e: unknown) => log(`[Avatar] Audio autoplay blocked: ${e}`, "error"));
+          log("[Avatar] Audio track attached", "info");
+        }
       });
 
       room.on(RoomEvent.Connected, () => {
-        log("[Avatar] Room connected — playing intro", "info");
-        onSpeakReady?.(speakText);
-        speakText(AVATAR_INTRO);
+        log("[Avatar] Room connected", "info");
+        onConnected?.();
       });
 
       room.on(RoomEvent.Disconnected, () => {
@@ -140,12 +123,15 @@ export default function VideoPlayer({ onLog, onSpeakReady }: VideoPlayerProps) {
 
   return (
     <div className="relative w-full h-full min-h-[400px] flex flex-col items-center justify-center">
+      {/* Hidden audio element for avatar voice — separate from video to avoid mute restrictions */}
+      <audio ref={audioRef} autoPlay playsInline />
+
       {/* Video element — always rendered so the ref is stable */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
-        muted={status !== "connected"}
+        muted
         className={`w-full h-full object-cover transition-opacity duration-500 ${
           status === "connected" ? "opacity-100" : "opacity-0 absolute"
         }`}

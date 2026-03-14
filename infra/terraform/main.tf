@@ -98,7 +98,7 @@ resource "azurerm_cognitive_deployment" "embed" {
   }
 
   scale {
-    type     = "Standard"
+    type     = "GlobalStandard"
     capacity = 120
   }
 }
@@ -111,12 +111,23 @@ resource "azurerm_role_assignment" "cognitive_user" {
   principal_id         = azurerm_user_assigned_identity.backend.principal_id
 }
 
-# ── Azure Static Web Apps — Free tier (Next.js static export) ─────────────────
+# ── Azure Speech Services (TTS for avatar voice) ───────────────────────────────
+# F0 = free (5 h neural TTS / month) — sufficient for a portfolio demo
+
+resource "azurerm_cognitive_account" "speech" {
+  name                = "${local.prefix}-speech"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  kind                = "SpeechServices"
+  sku_name            = "F0"
+  tags                = local.tags
+}
+
 
 resource "azurerm_static_web_app" "frontend" {
   name                = "${local.prefix}-swa"
-  # SWA availability is limited — eastus2 has consistent coverage
-  location            = "eastus2"
+  # SWA availability — westeurope is available and keeps deployment in Europe
+  location            = "westeurope"
   resource_group_name = azurerm_resource_group.rg.name
   sku_tier            = "Free"
   sku_size            = "Free"
@@ -126,6 +137,7 @@ resource "azurerm_static_web_app" "frontend" {
 # ── Container Apps Environment (Consumption — scales to zero) ─────────────────
 
 resource "azurerm_container_app_environment" "cae" {
+  count                      = var.enable_container_apps ? 1 : 0
   name                       = "${local.prefix}-cae"
   location                   = azurerm_resource_group.rg.location
   resource_group_name        = azurerm_resource_group.rg.name
@@ -137,9 +149,10 @@ resource "azurerm_container_app_environment" "cae" {
 # min_replicas=0 → scales to zero when idle; cold-start ~3–5 s (fine for a portfolio)
 
 resource "azurerm_container_app" "backend" {
+  count                        = var.enable_container_apps ? 1 : 0
   name                         = "${local.prefix}-backend"
   resource_group_name          = azurerm_resource_group.rg.name
-  container_app_environment_id = azurerm_container_app_environment.cae.id
+  container_app_environment_id = azurerm_container_app_environment.cae[0].id
   revision_mode                = "Single"
   tags                         = local.tags
 
@@ -170,6 +183,10 @@ resource "azurerm_container_app" "backend" {
     name  = "liveavatar-api-key"
     value = var.live_avatar_api_key
   }
+  secret {
+    name  = "speech-key"
+    value = azurerm_cognitive_account.speech.primary_access_key
+  }
 
   ingress {
     allow_insecure_connections = false
@@ -193,25 +210,71 @@ resource "azurerm_container_app" "backend" {
       memory = "1Gi"
 
       # ── AI provider ──────────────────────────────────────────────────────────
-      env { name = "LLM_PROVIDER";                  value = "azure_openai" }
-      env { name = "AZURE_OPENAI_ENDPOINT";         value = azurerm_cognitive_account.openai.endpoint }
-      env { name = "AZURE_OPENAI_API_VERSION";      value = "2024-08-01-preview" }
-      env { name = "AZURE_OPENAI_CHAT_DEPLOYMENT";  value = azurerm_cognitive_deployment.chat.name }
-      env { name = "AZURE_OPENAI_EMBED_DEPLOYMENT"; value = azurerm_cognitive_deployment.embed.name }
+      env {
+        name  = "LLM_PROVIDER"
+        value = "azure_openai"
+      }
+      env {
+        name  = "AZURE_OPENAI_ENDPOINT"
+        value = azurerm_cognitive_account.openai.endpoint
+      }
+      env {
+        name  = "AZURE_OPENAI_API_VERSION"
+        value = "2024-08-01-preview"
+      }
+      env {
+        name  = "AZURE_OPENAI_CHAT_DEPLOYMENT"
+        value = azurerm_cognitive_deployment.chat.name
+      }
+      env {
+        name  = "AZURE_OPENAI_EMBED_DEPLOYMENT"
+        value = azurerm_cognitive_deployment.embed.name
+      }
       # Empty string → Python DefaultAzureCredential uses the Managed Identity
-      env { name = "AZURE_OPENAI_API_KEY";          secret_name = "aoai-api-key" }
+      env {
+        name        = "AZURE_OPENAI_API_KEY"
+        secret_name = "aoai-api-key"
+      }
 
       # ── Vector database ───────────────────────────────────────────────────────
-      env { name = "QDRANT_MODE";          value       = "cloud" }
-      env { name = "QDRANT_CLOUD_URL";     secret_name = "qdrant-url" }
-      env { name = "QDRANT_CLOUD_API_KEY"; secret_name = "qdrant-api-key" }
+      env {
+        name  = "QDRANT_MODE"
+        value = "cloud"
+      }
+      env {
+        name        = "QDRANT_CLOUD_URL"
+        secret_name = "qdrant-url"
+      }
+      env {
+        name        = "QDRANT_CLOUD_API_KEY"
+        secret_name = "qdrant-api-key"
+      }
 
       # ── LiveAvatar ────────────────────────────────────────────────────────────
-      env { name = "LIVEAVATAR_API_KEY";   secret_name = "liveavatar-api-key" }
-      env { name = "LIVEAVATAR_AVATAR_ID"; value       = var.live_avatar_avatar_id }
+      env {
+        name        = "LIVEAVATAR_API_KEY"
+        secret_name = "liveavatar-api-key"
+      }
+      env {
+        name  = "LIVEAVATAR_AVATAR_ID"
+        value = var.live_avatar_avatar_id
+      }
 
       # ── CORS: restrict to the Static Web App origin ───────────────────────────
-      env { name = "ALLOWED_ORIGINS"; value = "https://${azurerm_static_web_app.frontend.default_host_name}" }
+      env {
+        name  = "ALLOWED_ORIGINS"
+        value = "https://${azurerm_static_web_app.frontend.default_host_name}"
+      }
+
+      # ── Azure Speech TTS ──────────────────────────────────────────────────────
+      env {
+        name        = "AZURE_SPEECH_KEY"
+        secret_name = "speech-key"
+      }
+      env {
+        name  = "AZURE_SPEECH_REGION"
+        value = azurerm_resource_group.rg.location
+      }
     }
 
     http_scale_rule {
@@ -225,3 +288,4 @@ resource "azurerm_container_app" "backend" {
     azurerm_role_assignment.cognitive_user,
   ]
 }
+

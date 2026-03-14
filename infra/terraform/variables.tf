@@ -66,3 +66,9 @@ variable "live_avatar_avatar_id" {
   type        = string
   default     = "default"
 }
+
+variable "enable_container_apps" {
+  description = "Deploy the Container Apps Environment and backend Container App. Set false to skip (saves cost during development)."
+  type        = bool
+  default     = true
+}

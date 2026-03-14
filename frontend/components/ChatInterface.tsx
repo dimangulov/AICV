@@ -16,11 +16,9 @@ import type { LogEntry } from "@/types";
 
 interface ChatInterfaceProps {
   onLog: (message: string, level?: LogEntry["level"], step?: number) => void;
-  /** Called with each RAG answer so the avatar can speak it. */
-  onAnswer?: (text: string) => void;
 }
 
-export default function ChatInterface({ onLog, onAnswer }: ChatInterfaceProps) {
+export default function ChatInterface({ onLog }: ChatInterfaceProps) {
   const [textInput, setTextInput] = useState("");
   const [answer, setAnswer] = useState("");
   const [latency, setLatency] = useState<number | null>(null);
@@ -49,7 +47,6 @@ export default function ChatInterface({ onLog, onAnswer }: ChatInterfaceProps) {
 
         setAnswer(result.answer);
         setLatency(result.latency_ms);
-        onAnswer?.(result.answer);
         onLog(
           `Step 4: Response ready — ${result.latency_ms}ms ✓`,
           "success",

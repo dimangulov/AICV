@@ -1,6 +1,6 @@
 output "backend_url" {
   description = "HTTPS URL of the FastAPI backend Container App."
-  value       = "https://${azurerm_container_app.backend.latest_revision_fqdn}"
+  value       = var.enable_container_apps ? "https://${azurerm_container_app.backend[0].latest_revision_fqdn}" : "(container apps disabled)"
 }
 
 output "frontend_url" {
@@ -25,12 +25,23 @@ output "openai_endpoint" {
 
 output "container_app_name" {
   description = "Name of the backend Container App (used by the deploy GitHub Action)."
-  value       = azurerm_container_app.backend.name
+  value       = var.enable_container_apps ? azurerm_container_app.backend[0].name : "(container apps disabled)"
 }
 
 output "resource_group_name" {
   description = "Resource group containing all deployed resources."
   value       = azurerm_resource_group.rg.name
+}
+
+output "speech_key" {
+  description = "Azure Speech Services key — copy to AZURE_SPEECH_KEY in backend/.env for local dev."
+  value       = azurerm_cognitive_account.speech.primary_access_key
+  sensitive   = true
+}
+
+output "speech_endpoint" {
+  description = "Azure Speech Services endpoint."
+  value       = azurerm_cognitive_account.speech.endpoint
 }
 
 output "static_web_app_api_key" {
