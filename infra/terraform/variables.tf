@@ -13,7 +13,7 @@ variable "resource_group_name" {
 variable "location" {
   description = "Primary Azure region for most resources."
   type        = string
-  default     = "westeurope"
+  default     = "northeurope"
 }
 
 variable "openai_location" {
