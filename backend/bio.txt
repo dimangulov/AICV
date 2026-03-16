@@ -21,23 +21,21 @@ Backend Mastery:
 - Latency optimization, end-to-end encryption
 
 Frontend Excellence:
-- Angular and TypeScript: reactive state management, high-performance UI rendering
+- React and TypeScript: reactive state management, high-performance UI rendering
 - Focus on the API (Data Contract) as the bridge between frontend and backend
 - Optimizing change detection and paginated payloads to minimize memory footprint
 
 Cloud-Native Ecosystem:
 - Azure (Certified Solution Architect): Azure Functions, AKS, Azure Container Apps
-- AWS: Lambda, ECS, API Gateway — serverless-first approach
 - Docker containerization, Kubernetes orchestration
 - Infrastructure as Code: Terraform, Bicep
-- CI/CD: GitHub Actions — "if it's not automated, it's a bottleneck"
+- CI/CD: Azure DevOps — "if it's not automated, it's a bottleneck"
 
 Infrastructure and DevOps:
 - Kubernetes: multi-cluster management, RBAC, Helm chart authoring, custom operators
-- GitOps: ArgoCD, Flux — declarative, audit-friendly deployments
 - Observability: OpenTelemetry, Grafana + Loki + Tempo, Datadog — full-stack tracing and alerting
-- CI/CD pipelines: GitHub Actions, Tekton — automated build, test, and deploy workflows
-- Security: secrets management (Azure Key Vault, AWS Secrets Manager), network policies, SOC 2 hardening
+- CI/CD pipelines: Azure DevOps automated build, test, and deploy workflows
+- Security: secrets management (Azure Key Vault), network policies
 - Cost optimization: spot-instance autoscaling, reserved capacity planning, infrastructure cost forecasting
 - Internal Developer Platforms: Backstage service catalogs, Terraform scaffolding, automated runbook generation
 
@@ -49,11 +47,9 @@ Database Expertise:
 
 AI and ML Engineering:
 - LLM integration: RAG pipelines, prompt engineering, LangChain LCEL
-- Vector databases: Qdrant, Pinecone, pgvector — similarity search at scale
-- Fine-tuning and deploying open-source models (Mistral, LLaMA) for domain-specific tasks
-- MLOps: model versioning (MLflow), model serving (vLLM, Triton Inference Server)
+- Vector databases: Qdrant — similarity search at scale
 - Retrieval-Augmented Generation (RAG): end-to-end pipeline design, chunking strategies, hybrid search
-- AI-powered feature development: semantic search, recommendation engines, automated code review
+- AI-powered feature development: semantic search, recommendation engines
 - Embedding models: nomic-embed-text, OpenAI text-embedding-3, Azure OpenAI embeddings
 
 Soft Skills:
@@ -64,95 +60,109 @@ Soft Skills:
 
 PROFESSIONAL EXPERIENCE
 
-Principal Architect — TechNova Solutions (2020–Present)
-- Lead architect for a $50M cloud transformation program supporting 8 million daily active users across 14 countries
-- Designed a real-time data platform processing 2 million events per second using Kafka Streams and ClickHouse, replacing a brittle batch ETL pipeline
-- Introduced AI-assisted code review using LLM embeddings (RAG over internal ADRs), reducing architectural review time by 40% across 12 engineering squads
-- Established and chair the company-wide Architecture Review Board, defining standards and guardrails for 200+ production microservices
-- Reduced infrastructure costs by $1.2M per year through Kubernetes spot-instance autoscaling, request-based Lambda billing, and reserved capacity optimization
-- Mentored 12 senior engineers on architectural patterns: CQRS, saga pattern, bulkhead, circuit-breaker
-- Led security hardening initiative achieving SOC 2 Type II certification ahead of schedule
+Senior Cloud Architect — Deloitte (2023–...)
+Hexagon Metrology
+- Engineered a scalable SDLC framework with isolated Kubernetes namespaces per developer, reducing environment contention by 100% and accelerating feature-testing cycles by 50%
+- Orchestrated full-scale migration of enterprise solutions from Azure PaaS to AKS, achieving 35% reduction in monthly cloud infrastructure costs through improved resource density and bin-packing
+- Architected in-cluster analogues (RabbitMQ, Redis containers) to replace proprietary Azure PaaS services, eliminating vendor lock-in and reducing external service latency
+- Standardized AKS container orchestration policies for automated scaling and self-healing, maintaining 99.9% uptime
+- Optimized CI/CD pipeline with automated Helm chart deployments, cutting manual configuration time by 100% and ensuring environment parity across dev, staging, and production
+Technologies: Azure, Docker, Kubernetes, Terraform, Helm, Azure DevOps, IaC, PowerShell, Linux, Claude, GitHub Copilot
 
-Senior Software Architect — CloudFirst Corp (2017–2020)
-- Architected a multi-tenant SaaS analytics platform from zero to $10M ARR in 24 months
-- Designed the domain-driven microservices decomposition of a 500,000-line Python monolith — 18-month migration with zero customer-visible downtime
-- Built a real-time analytics pipeline using Apache Flink and ClickHouse, serving 50+ enterprise clients with sub-second query latency
-- Drove adoption of gRPC-based inter-service communication, replacing REST/JSON and reducing median latency by 35% and payload size by 60%
-- Led migration from on-premise PostgreSQL clusters to Aurora Serverless, eliminating 30+ hours of DBA toil per month
-- Designed multi-region active-active deployment achieving 99.99% SLA for critical payment flows
+Cloud Architect — EPAM (2022–2023)
+- Designed end-to-end Azure landing zone for a major insurance client, covering hub-and-spoke networking topology, ExpressRoute connectivity, Azure Firewall, NSGs, and Private Endpoints across all workloads
+- Architected full Azure networking landscape: VNet peering, DNS resolution strategy, route tables, and DDoS protection aligned with the client's enterprise security policies
+- Led migration of 30+ on-premises SQL Server instances to Azure SQL Managed Instance and Azure SQL Database, using Azure Database Migration Service with near-zero downtime cutover
+- Designed the data platform layer: Azure Data Factory pipelines for ETL, Azure Data Lake Storage Gen2 for raw and curated zones, and Synapse Analytics for reporting
+- Delivered insurance-domain compliance controls: Azure Policy definitions, RBAC governance model, Microsoft Defender for Cloud configuration, and audit log routing to Log Analytics
+- Collaborated with security and compliance teams to achieve alignment with insurance regulatory requirements (GDPR, Solvency II data residency)
+Technologies: Azure, Azure SQL MI, Azure Data Factory, Synapse Analytics, ExpressRoute, Azure Firewall, Terraform, Azure Policy, Defender for Cloud, Azure DevOps
 
-Lead Engineer / Software Architect — DataFlow Systems (2014–2017)
-- Designed and built an IoT data ingestion platform handling 500,000 sensor readings per minute from industrial facilities across 8 time zones
-- Created a distributed caching strategy with Redis Cluster that eliminated database read bottlenecks, reducing P99 query latency from 450ms to 12ms
-- Authored the company's internal Architecture Decision Records (ADR) framework, which became the standard across all engineering teams
-- Delivered training programs on 12-factor app principles, clean architecture, and TDD to 30+ developers
-- Built automated infrastructure cost forecasting tool (Python + Terraform + AWS Cost Explorer API) that saved $300K in the first year
+Platform Architect — KPMG ITS (Bulgaria, Sofia) (2018–2022)
+- Designed an enterprise identity management system with authentication, ADFS integration, social identity providers, role mapping, and group management
+- Led solution study and initial setup for multiple projects: solution structure, DAL model, security requirements, CI/CD, and documentation
+- Architected microservices platform on Azure Cloud Next (AKS, ACR, Azure APIM, Azure DevOps) and authored developer guidelines
+- Delivered projects spanning mobile apps, SPAs, progressive web apps, and back-end services
+Technologies: Azure, .NET Core, Kubernetes, Docker, Microservices, RBAC, Azure DevOps, Authentication, Identity Server
 
-Senior Software Engineer — Acme Financial Tech (2011–2014)
-- Core contributor to a high-frequency trading platform with sub-millisecond latency requirements ($2B daily notional)
-- Implemented FIX protocol message parsing and normalization engine in C++ and Python, processing 50,000 messages per second
-- Optimized critical-path database queries (PostgreSQL), reducing P99 read latency from 200ms to 8ms through index optimization and materialized views
-- Introduced automated performance regression testing into the CI pipeline, catching three latency regressions before production in the first quarter
+Senior .NET Developer — KPMG ITS (Bulgaria, Sofia) (2017–2018)
+- Refactored legacy ASP.NET system, removing Orchard CMS dependency and replacing it with clean REST API subsystems
+- Implemented database normalization and data model improvements
+- Refactored inefficient jQuery-heavy web client, eliminating redundancy and improving maintainability
+Technologies: .NET Core, JavaScript, TypeScript, HTML, CSS, SQL Server, Kendo UI, Azure DevOps
+
+Senior Software Developer — VTB Factoring (Russia, Moscow) (2015–2017)
+- Supported and enhanced Client Office 2.0, debugging and refactoring integrations with external providers
+- Designed and built Client Office 3.0 from scratch: ASP.NET Core, Identity Server, Angular, Kendo UI, TypeScript, SQL Server, xUnit, Jasmine
+- Refactored the back-office system and optimized legacy factoring services
+Technologies: ASP.NET Core, Entity Framework Core, SQL Server, Angular, TypeScript, RabbitMQ, WCF, Kendo UI
+
+Lead Developer / Software Architect — Dynamics Technologies, Ltd (Russia & Kazakhstan) (2012–2015)
+- Refactored EDS "Evridok" (15,000 users, Kazakhstan railways): fixed architectural flaws, optimized critical queries, and resolved major bug hotspots
+- Designed and developed a cloud document management system (Documents24)
+- Built the Dynamics EAM platform: domain model of 200+ classes deployed across 20+ load-balanced servers
+- Developed an Outlook add-in, WPF/Silverlight desktop clients, and authored solution designs for enterprise systems
+- Acted as team lead across EAM, ACS highway, and ACS car-repair depot product lines
+Technologies: .NET, ASP.NET MVC, WPF, WCF, SQL Server, PostgreSQL, AngularJS, Xamarin, Silverlight, NUnit
+
+Software Developer — LLC "Info-T" (Kazakhstan, Pavlodar) (2011–2012)
+- Developed a hardware token single-PC restriction subsystem
+- Built restaurant management software including table layout design and printed bill templates
+- Mentored team members on WPF and .NET development practices
+Technologies: .NET 4, WPF, WCF, WinForms, MySQL
 
 EDUCATION
 
-M.Sc. Computer Science — University of Edinburgh (2011)
-Thesis: "Optimizing Consistent Hashing for Geo-Distributed Key-Value Stores"
-Dissertation supervised by Prof. Eleanor Davies; achieved distinction.
-
-B.Eng. Software Engineering — Trinity College Dublin (2009)
-First Class Honours, ranked 2nd in graduating cohort.
+B.Eng. Computer Software Engineering — Pavlodar State University (2008–2012)
+Kazakhstan
 
 CERTIFICATIONS
 
-- AWS Certified Solutions Architect — Professional (renewed 2025)
-- Certified Kubernetes Administrator (CKA) — CNCF (2022)
-- Google Cloud Professional Cloud Architect (2021)
-- HashiCorp Certified: Terraform Associate (2022)
-- TOGAF 9.2 Certified Enterprise Architect (2019)
+- Exam 532: Developing Microsoft Azure Solutions — Microsoft (2018)
+- 583 PRO: Designing and Developing Windows Azure Applications — Microsoft (2013)
+- Microsoft Certified Professional Developer: Windows Developer 4 — Microsoft (2013)
+- Exam 480: Programming in HTML5 with JavaScript and CSS3 — Microsoft (2013)
 
 NOTABLE PROJECTS
 
-Project: Federated Machine Learning Platform (TechNova, 2023–2024)
-Led the design of a privacy-preserving federated learning platform enabling model training across client data silos without centralizing sensitive data. Used the Flower (flwr) framework with secure aggregation and differential privacy noise injection.
-Technologies: Python, Flower, PyTorch, Kubernetes, Kafka (for coordinator communication)
-Impact: Enabled 3 Fortune 500 clients to collaboratively train shared fraud detection models, improving F1 score by 18% versus individual models without sharing raw data.
+Project: AI Digital Twin CV (Personal Project, 2026)
+Designed and built an interactive AI-powered digital twin CV — a full-stack application where a WebRTC avatar answers questions about my professional background in real time. The system uses a RAG pipeline over a structured CV knowledge base, streamed LLM responses, and per-session LiveAvatar WebRTC integration for avatar speech synthesis.
+Architecture: FastAPI backend with LangChain LCEL, Azure OpenAI (gpt-4o-mini + text-embedding-3-small), Qdrant vector store, continuous Web Speech API for voice input, Next.js 16 / React 19 frontend with streaming SSE, per-user session isolation with eviction background task.
+Technologies: Python, FastAPI, LangChain, Azure OpenAI, Qdrant, Next.js, React, TypeScript, Tailwind CSS, LiveKit, WebRTC, Docker, Azure Container Apps, Terraform, Bicep
+GitHub: https://github.com/dimangulov/AICV
 
-Project: Zero-Downtime Database Migration (CloudFirst, 2019)
-Orchestrated a live migration of a 4TB PostgreSQL database to CockroachDB with zero downtime using Change Data Capture (CDC) with Debezium, a custom dual-write proxy layer, and a phased read-traffic cutover strategy.
-Technologies: PostgreSQL, CockroachDB, Debezium, Kafka, Go (migration tooling)
-Impact: Achieved 99.999% availability during the 6-week migration window; eliminated the single largest point of failure in the architecture.
+Project: Hexagon Autonomous Metrology (Hexagon, 2021–Present)
+Architected the Autonomous Metrology Suite as the new centre of smart quality workflows, simplifying metrology programming, reporting, and monitoring to accelerate data-driven quality assurance and enable better manufacturing outcomes.
+Technologies: Azure, Kubernetes, Terraform, Helm, Docker, Azure DevOps, CI/CD, IaC
 
-Project: Real-Time Personalization Engine (TechNova, 2022)
-Designed and delivered a recommendation engine using Qdrant vector similarity search and LLM-based feature extraction (GPT-3.5 embeddings, later migrated to nomic-embed-text for cost). Served personalized content to 5 million users with P95 latency under 50ms.
-Technologies: Python, FastAPI, Qdrant, LangChain, Kafka, Redis, Next.js
-Impact: 22% increase in user engagement (click-through rate) and 14% reduction in churn within 3 months of launch.
+Project: Atlas Tax Engine (KPMG, 2018–2021)
+Architectural design and development of a highly decoupled tax calculation engine using a "Headless CMS" approach with metadata-driven workflows. Tax rules, regional exemptions, and calculation parameters update dynamically without redeployment, ensuring agility against ever-changing global tax regulations.
+Technologies: .NET Core, Azure, Microservices, Docker, Kubernetes, Azure DevOps
 
-Project: Internal Developer Platform (TechNova, 2021)
-Architected and sponsored the Internal Developer Platform using Backstage, integrating service catalog, Terraform scaffolding, CI/CD templates, and automatic runbook generation using LLMs. Reduced new microservice time-to-production from 3 weeks to 2 days.
+Project: Atlas Cloud (KPMG, 2018–2021)
+Multi-tenant SaaS platform for KPMG member groups to provide and sell services to businesses of all sizes. Components include public portal, order management, and identity management services.
+Technologies: Azure, .NET Core, Angular, Kubernetes, Azure APIM, Identity Server
 
-PUBLICATIONS AND PUBLIC SPEAKING
+Project: eVigor — FHIR Personal Health Record Platform
+End-to-end development of a secure, interoperable mobile platform giving patients full sovereignty over their medical history. Built with Flutter, integrating the HL7 FHIR standard for seamless EHR interoperability via Azure Health Data Services.
+Technologies: Flutter, Azure Health Data Services (Azure FHIR), .NET Core, Azure
 
-- "Taming LLMs in Production: Lessons from 18 Months of RAG Pipelines" — QCon London 2025 (conference talk, 400 attendees)
-- "Event-Driven Architecture at Scale: Patterns That Actually Work" — AWS re:Invent 2024 (lightning talk)
-- "The Hidden Costs of Microservices" — InfoQ Engineering Culture Podcast (2023)
-- Technical Blog: alexmorgan.dev — publishing since 2016, 40,000 monthly readers
-- Open-source contributions: LangChain (RAG tooling), FastAPI (middleware examples), Qdrant Python SDK (batch upsert optimization)
+Project: Documents24 — Cloud-Native EDMS
+High-performance Electronic Document Management System engineered for enterprise-grade scalability on .NET Core orchestrated via AKS. Integrates advanced workflow automation with compliance standards for healthcare, banking, and manufacturing.
+Technologies: .NET Core, AKS, Azure, Microservices, CI/CD
+
+Project: Dynamics EAM (Dynamics Technologies, 2012–2015)
+Enterprise asset management platform enabling managers to view and proactively optimize company-owned assets. Domain model of 200+ classes deployed across 20+ load-balanced servers for Kazakhstan railways.
+Technologies: .NET, WPF, WCF, SQL Server, PostgreSQL, AngularJS
 
 LANGUAGES
 
-- English (native)
-- German (professional working proficiency, B2)
-- Ukrainian (conversational, A2)
-
-PERSONAL INTERESTS
-
-Outside of work, I contribute to open-source projects in the Rust ecosystem, mentor junior developers through the Code First Girls initiative, and write about distributed systems and AI engineering on my technical blog. I hold a private pilot licence (PPL-A) and enjoy landscape photography. I regularly attend local meetups for the London Kubernetes and AI/ML communities.
+- English (C1)
+- Russian (Native)
 
 CONTACT
 
-Email: alex.morgan@example.com
-LinkedIn: linkedin.com/in/alexmorganarch
-GitHub: github.com/alexmorganarch
-Blog: alexmorgan.dev
-Location: London, UK (open to remote and hybrid roles)
+Email: dimangulov@gmail.com
+LinkedIn: https://www.linkedin.com/in/damir-imangulov-5b1346102/
+GitHub: https://github.com/dimangulov/
+Location: Sofia, BG (open to remote and hybrid roles)

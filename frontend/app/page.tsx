@@ -7,7 +7,7 @@ import DevConsole from "@/components/DevConsole";
 import ArchitectureSection from "@/components/ArchitectureSection";
 import DesignSection from "@/components/DesignSection";
 import C4DiagramsSection from "@/components/C4DiagramsSection";
-import { Github } from "lucide-react";
+import { Github, Mail, Linkedin, MapPin } from "lucide-react";
 import { speakText, initSessionId } from "@/lib/api";
 import type { LogEntry } from "@/types";
 
@@ -123,15 +123,37 @@ export default function Home() {
                     AI digital twin about .NET &amp; Python backends, React frontends,
                     cloud-native architecture, or any technical challenge.
                   </p>
-                  <a
-                    href="https://github.com/dimangulov/AICV"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 mt-3 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 hover:border-gray-500 hover:bg-gray-700 text-gray-300 hover:text-white text-xs font-medium transition-all"
-                  >
-                    <Github className="w-4 h-4" />
-                    dimangulov/AICV
-                  </a>
+                  <div className="flex flex-wrap items-center gap-2 mt-3">
+                    <a
+                      href="mailto:dimangulov@gmail.com"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 hover:border-gray-500 hover:bg-gray-700 text-gray-300 hover:text-white text-xs font-medium transition-all"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      dimangulov@gmail.com
+                    </a>
+                    <a
+                      href="https://www.linkedin.com/in/damir-imangulov-5b1346102/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 hover:border-gray-500 hover:bg-gray-700 text-gray-300 hover:text-white text-xs font-medium transition-all"
+                    >
+                      <Linkedin className="w-3.5 h-3.5" />
+                      LinkedIn
+                    </a>
+                    <a
+                      href="https://github.com/dimangulov/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 hover:border-gray-500 hover:bg-gray-700 text-gray-300 hover:text-white text-xs font-medium transition-all"
+                    >
+                      <Github className="w-3.5 h-3.5" />
+                      GitHub
+                    </a>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-400 text-xs font-medium">
+                      <MapPin className="w-3.5 h-3.5" />
+                      Sofia, BG · open to remote &amp; hybrid
+                    </span>
+                  </div>
                 </div>
               </header>
 

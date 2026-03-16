@@ -31,6 +31,12 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
     const [textInput, setTextInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const threadRef = useRef<HTMLDivElement>(null);
+    // Ref-based guard — unlike isLoading state, this is never stale inside callbacks
+    const isSubmittingRef = useRef(false);
+    // Mirror of messages for synchronous reads outside state updaters
+    const messagesRef = useRef<ConversationMessage[]>([]);
+    // Keep a stable ref to the latest handleQuestion to break the stale closure in onResult
+    const handleQuestionRef = useRef<(q: string) => void>(() => {});
 
     // Expose startContinuous to parent (page.tsx auto-starts after intro)
     const {
@@ -46,12 +52,9 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
       onResult: useCallback(
         (text: string) => {
           onLog(`Listening — captured: "${text}"`, "success", 1);
-          // eslint-disable-next-line @typescript-eslint/no-use-before-define
-          handleQuestion(text);
+          handleQuestionRef.current(text);
         },
-        // handleQuestion is defined below but stable via useCallback
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        [],
+        [onLog],
       ),
       onError: (err) => onLog(`Speech recognition error: ${err}`, "error"),
     });
@@ -64,6 +67,9 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
       if (el) el.scrollTop = el.scrollHeight;
     }, [messages, streamingText]);
 
+    // Keep messagesRef in sync for synchronous reads in handleQuestion
+    useEffect(() => { messagesRef.current = messages; }, [messages]);
+
     /** Derive last-N history for backend context. */
     const buildHistory = (msgs: ConversationMessage[]): HistoryMessage[] =>
       msgs
@@ -73,22 +79,30 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
     const handleQuestion = useCallback(
       async (question: string) => {
         const trimmed = question.trim();
-        if (!trimmed || isLoading) return;
+        if (!trimmed || isSubmittingRef.current) return;
+        isSubmittingRef.current = true;
 
         setIsLoading(true);
         setStreamingText("");
 
-        // Append user message
-        const userMsg: ConversationMessage = {
-          id: String(++_msgId),
-          role: "user",
-          text: trimmed,
-        };
+        // Snapshot history synchronously from current messages before appending
+        // the user bubble (functional updater would run during render — forbidden).
         setMessages((prev) => {
-          const history = buildHistory(prev);
+          // Only append — no side-effects here.
+          const userMsg: ConversationMessage = {
+            id: String(++_msgId),
+            role: "user",
+            text: trimmed,
+          };
+          return [...prev, userMsg];
+        });
 
-          // kick off async work with fresh history snapshot
-          (async () => {
+        // Build history from current messages (pre-append snapshot via functional read)
+        // We need messages as they are right now; use a ref snapshot instead.
+        const history = buildHistory(messagesRef.current);
+
+        // Kick off async work fully outside any state updater
+        (async () => {
             onLog(`Question: "${trimmed}"`, "info", 1);
             onLog("RAG Retrieval — searching CV knowledge base…", "info", 2);
             onLog("Streaming response…", "info", 3);
@@ -128,13 +142,14 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
             setMessages((cur) => [...cur, assistantMsg]);
             setStreamingText("");
             setIsLoading(false);
-          })();
-
-          return [...prev, userMsg];
-        });
+            isSubmittingRef.current = false;
+        })();
       },
-      [isLoading, onLog],
+      [onLog],
     );
+
+    // Keep handleQuestionRef in sync so onResult always calls the latest version
+    useEffect(() => { handleQuestionRef.current = handleQuestion; }, [handleQuestion]);
 
     const handleTextSubmit = (e: React.FormEvent) => {
       e.preventDefault();
