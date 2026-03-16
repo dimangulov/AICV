@@ -16,9 +16,12 @@ import base64
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +35,8 @@ import httpx
 import miniaudio
 import websockets
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException, status
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, status
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Qdrant as QdrantVectorStore
@@ -107,13 +111,28 @@ ALLOWED_ORIGINS: list[str] = [
     if o.strip()
 ]
 
+# Validates X-Session-ID header — must be UUID v4 format
+_UUID_RE: re.Pattern[str] = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+MAX_SESSIONS: int = int(os.getenv("MAX_SESSIONS", "50"))
+_SESSION_IDLE_TTL: float = 1800.0  # evict sessions idle > 30 min
+
 # ---------------------------------------------------------------------------
 # Pydantic request / response models
 # ---------------------------------------------------------------------------
 
 
+class HistoryMessage(BaseModel):
+    role: str = Field(..., pattern=r"^(user|assistant)$")
+    content: str = Field(..., min_length=1, max_length=2000)
+
+
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=500)
+    history: list[HistoryMessage] = Field(default_factory=list, max_length=12)
 
     @field_validator("question")
     @classmethod
@@ -264,6 +283,18 @@ def _format_docs(docs: list) -> str:
     return "\n\n---\n\n".join(doc.page_content for doc in docs)
 
 
+def _format_history(history: list[HistoryMessage]) -> str:
+    """Format conversation history into a prompt block. Returns empty string if no history."""
+    if not history:
+        return ""
+    lines = ["--- Conversation History ---"]
+    for msg in history:
+        prefix = "Human" if msg.role == "user" else "Assistant"
+        lines.append(f"{prefix}: {msg.content}")
+    lines.append("--- End of History ---\n")
+    return "\n".join(lines) + "\n"
+
+
 def build_rag_chain() -> RunnableSerializable:
     """
     Load bio.txt, chunk it, embed chunks into Qdrant, and return an LCEL
@@ -330,7 +361,7 @@ If the context does not contain enough information, frame it as a requirement.
 {context}
 --- End of Context ---
 
-Question: {question}
+{history}Question: {question}
 
 Answer:"""
     )
@@ -338,11 +369,12 @@ Answer:"""
     # 6 — LLM (provider-aware)
     llm = _create_llm()
 
-    # 7 — Compose the LCEL chain
+    # 7 — Compose the LCEL chain — accepts dict {"question": str, "history": str}
     chain: RunnableSerializable = (
         {
-            "context": retriever | _format_docs,
-            "question": RunnablePassthrough(),
+            "context": itemgetter("question") | retriever | _format_docs,
+            "question": itemgetter("question"),
+            "history": itemgetter("history"),
         }
         | prompt
         | llm
@@ -374,7 +406,9 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         # Log the error but allow startup to complete — /health will report degraded
         logger.error("RAG chain initialisation failed: %s", exc, exc_info=True)
+    eviction_task = asyncio.create_task(_evict_idle_sessions())
     yield
+    eviction_task.cancel()
     logger.info("=== Digital Twin CV API — shutdown ===")
 
 
@@ -396,7 +430,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-Session-ID"],
     allow_credentials=False,
 )
 
@@ -411,7 +445,11 @@ app.add_middleware(
     response_model=AskResponse,
     summary="Ask a question about the candidate",
 )
-async def ask(payload: AskRequest, background_tasks: BackgroundTasks) -> AskResponse:
+async def ask(
+    payload: AskRequest,
+    background_tasks: BackgroundTasks,
+    x_session_id: str = Header(default="anonymous"),
+) -> AskResponse:
     """
     Accepts a natural-language question, runs the RAG pipeline (retrieve → prompt →
     LLM), and returns a grounded answer sourced from bio.txt.
@@ -425,13 +463,17 @@ async def ask(payload: AskRequest, background_tasks: BackgroundTasks) -> AskResp
             ),
         )
 
+    sid = x_session_id if _UUID_RE.match(x_session_id) else "anonymous"
     try:
         start = time.monotonic()
-        answer: str = _rag_chain.invoke(payload.question)
+        answer: str = _rag_chain.invoke({
+            "question": payload.question,
+            "history": _format_history(payload.history),
+        })
         elapsed_ms = int((time.monotonic() - start) * 1000)
         logger.info("Question answered in %dms: %r", elapsed_ms, payload.question[:60])
         if LIVEAVATAR_API_KEY:
-            background_tasks.add_task(_speak_on_avatar, answer)
+            background_tasks.add_task(_speak_on_avatar, answer, sid)
         return AskResponse(
             answer=answer,
             sources=[str(BIO_FILE_PATH)],
@@ -443,6 +485,85 @@ async def ask(payload: AskRequest, background_tasks: BackgroundTasks) -> AskResp
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Inference failed. Is Ollama still running?",
         ) from exc
+
+
+_SENTENCE_ENDINGS = re.compile(r'(?<=[.!?])\s+')
+
+
+@app.post(
+    "/ask/stream",
+    summary="Stream a question answer token by token (SSE)",
+)
+async def ask_stream(
+    payload: AskRequest,
+    x_session_id: str = Header(default="anonymous"),
+) -> StreamingResponse:
+    """
+    Server-Sent Events endpoint.  Streams LLM tokens to the browser as they
+    arrive so the user sees text immediately instead of waiting for the full
+    answer.  Also triggers avatar speech sentence-by-sentence as each sentence
+    completes, further reducing perceived latency.
+
+    Event format (newline-delimited):
+      data: <token>\n\n          — one or more LLM tokens
+      data: [DONE]\n\n           — stream complete
+    """
+    if _rag_chain is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="RAG chain is not initialised.",
+        )
+
+    sid = x_session_id if _UUID_RE.match(x_session_id) else "anonymous"
+
+    async def _generate():
+        start = time.monotonic()
+        full_answer: list[str] = []
+        sentence_buf: list[str] = []
+
+        try:
+            loop = asyncio.get_event_loop()
+            # astream is the async streaming variant of invoke
+            async for token in _rag_chain.astream({
+                "question": payload.question,
+                "history": _format_history(payload.history),
+            }):
+                full_answer.append(token)
+                sentence_buf.append(token)
+                # Emit token to browser immediately
+                yield f"data: {json.dumps(token)}\n\n"
+
+                # Check if we have a complete sentence — if so, fire TTS for it
+                if LIVEAVATAR_API_KEY and _SENTENCE_ENDINGS.search(token):
+                    sentence = "".join(sentence_buf).strip()
+                    sentence_buf.clear()
+                    if sentence:
+                        asyncio.create_task(_speak_on_avatar(sentence, sid))
+
+            # Speak any remaining text after the last sentence boundary
+            if LIVEAVATAR_API_KEY:
+                remainder = "".join(sentence_buf).strip()
+                if remainder:
+                    asyncio.create_task(_speak_on_avatar(remainder, sid))
+
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            answer_text = "".join(full_answer)
+            logger.info("Stream answered in %dms: %r", elapsed_ms, payload.question[:60])
+            # Final event carries latency metadata
+            yield f"data: [DONE] {elapsed_ms}\n\n"
+
+        except Exception as exc:
+            logger.error("Stream inference error: %s", exc, exc_info=True)
+            yield f"data: [ERROR] {json.dumps(str(exc))}\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -516,51 +637,46 @@ async def _synthesize_pcm(text: str) -> bytes:
     )
 
 
-async def _speak_on_avatar(text: str) -> None:
+async def _speak_on_avatar(text: str, user_session_id: str = "anonymous") -> None:
     """
-    Synthesize text via TTS and stream PCM audio to the active LiveAvatar
-    session WebSocket (LITE mode agent.speak protocol).
-
-    Performance optimisations vs. the previous implementation:
-    - TTS synthesis and session acquisition run in PARALLEL via asyncio.gather,
-      saving the full TTS round-trip (~300–800 ms) from the critical path.
-    - Audio is sent over the PERSISTENT _speak_ws connection established by
-      _avatar_ws_loop, eliminating the per-call TCP/TLS handshake (~200–500 ms)
-      and the 5-second session.state_updated wait.
+    Synthesize text via TTS and stream PCM audio to the user's LiveAvatar
+    WebSocket. Each user_session_id has its own per-session WS connection so
+    concurrent users never interleave audio.
     """
     if not LIVEAVATAR_API_KEY:
         logger.debug("[speak] No LIVEAVATAR_API_KEY — skipping avatar speech")
         return
 
+    entry = await _get_or_create_user_session(user_session_id)
+    entry.last_active = time.monotonic()
+
     # Run TTS synthesis and session acquisition concurrently — they are independent.
     try:
-        pcm_bytes, session = await asyncio.gather(
+        pcm_bytes, liveavatar_session = await asyncio.gather(
             _synthesize_pcm(text),
-            _get_or_create_liveavatar_session(),
+            _get_or_create_liveavatar_session(entry),
         )
     except Exception as exc:
         logger.error("[speak] Parallel TTS/session setup failed: %s", exc)
         return
 
-    ws = _speak_ws
+    ws = entry.speak_ws
     if ws is None:
-        logger.warning("[speak] Persistent WebSocket not yet ready — waiting up to 3 s")
-        # The _avatar_ws_loop task may still be connecting; give it a moment.
+        logger.warning("[speak] WebSocket not yet ready — waiting up to 3 s")
         for _ in range(6):
             await asyncio.sleep(0.5)
-            ws = _speak_ws
+            ws = entry.speak_ws
             if ws is not None:
                 break
         if ws is None:
-            logger.error("[speak] Persistent WebSocket unavailable after wait — dropping speak")
+            logger.error("[speak] WebSocket unavailable after wait — dropping speak")
             return
 
-    # LiveAvatar expects ~1 second chunks: 24000 samples × 2 bytes = 48 000 bytes
     CHUNK_SIZE = 48_000
     event_id = str(uuid.uuid4())
 
-    # Serialise concurrent speak calls so chunks from two responses don't interleave.
-    async with _speak_lock:
+    # Per-session lock: serialise chunks within one user's session only
+    async with entry.speak_lock:
         try:
             for i in range(0, len(pcm_bytes), CHUNK_SIZE):
                 chunk = pcm_bytes[i : i + CHUNK_SIZE]
@@ -573,10 +689,13 @@ async def _speak_on_avatar(text: str) -> None:
                 "type": "agent.speak_end",
                 "event_id": event_id,
             }))
-            logger.info("[speak] Avatar speak complete for session %s", session["session_id"])
+            logger.info(
+                "[speak] Done — user=%s liveav=%s",
+                user_session_id, liveavatar_session["session_id"],
+            )
         except Exception as exc:
-            logger.error("[speak] Avatar WebSocket error: %s", exc)
-            _invalidate_session(f"speak WS error: {exc}")
+            logger.error("[speak] WebSocket error: %s", exc)
+            entry.invalidate(f"speak WS error: {exc}")
 
 
 class SpeakRequest(BaseModel):
@@ -584,64 +703,103 @@ class SpeakRequest(BaseModel):
 
 
 @app.post("/speak", summary="Make the avatar speak arbitrary text")
-async def speak(payload: SpeakRequest, background_tasks: BackgroundTasks) -> dict[str, str]:
+async def speak(
+    payload: SpeakRequest,
+    background_tasks: BackgroundTasks,
+    x_session_id: str = Header(default="anonymous"),
+) -> dict[str, str]:
     """
-    Queues a TTS + WebSocket send to the active LiveAvatar session.
-    Used by the frontend to play the intro greeting on avatar connect.
+    Queues a TTS + WebSocket send to the caller's per-user LiveAvatar session.
     Returns immediately; speaking happens in the background.
     """
     if not LIVEAVATAR_API_KEY:
         return {"status": "mock"}
-    background_tasks.add_task(_speak_on_avatar, payload.text)
+    sid = x_session_id if _UUID_RE.match(x_session_id) else "anonymous"
+    background_tasks.add_task(_speak_on_avatar, payload.text, sid)
     return {"status": "queued"}
 
 
 # ---------------------------------------------------------------------------
-# LiveAvatar session cache + persistent WebSocket
-# A single avatar session is shared across all visitors and reused until it
-# expires, is invalidated on auth errors, or is detected as stopped by the
-# service via a WebSocket session.stopped event.
-#
-# _speak_ws holds the ONE persistent WebSocket connection used by both the
-# keep-alive heartbeat and all agent.speak calls, eliminating the per-call
-# TCP/TLS connect latency (~200–500 ms) and the 5-second state-event wait.
+# Per-user session store
+# Each browser tab gets its own UserSession keyed by X-Session-ID (UUID).
+# This replaces the former global _liveavatar_session / _speak_ws / _speak_lock
+# so that TTS from two concurrent users never interleave on the same WebSocket.
 # ---------------------------------------------------------------------------
-_liveavatar_session: dict[str, Any] | None = None
-_liveavatar_session_expires: float = 0.0          # monotonic time
-_liveavatar_session_lock: asyncio.Lock = asyncio.Lock()
-_LIVEAVATAR_SESSION_TTL: float = 1800.0           # 30 min conservative TTL
-_avatar_ws_task: asyncio.Task | None = None       # background WS loop
-_speak_ws: Any | None = None                      # persistent websockets connection
-_speak_lock: asyncio.Lock = asyncio.Lock()        # serialise concurrent speak calls
+
+@dataclass
+class UserSession:
+    liveavatar_data: dict[str, Any] | None = None
+    session_expires: float = 0.0
+    session_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    ws_task: asyncio.Task | None = None
+    speak_ws: Any | None = None                 # persistent websockets connection
+    speak_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    last_active: float = field(default_factory=time.monotonic)
+
+    def is_valid(self) -> bool:
+        return self.liveavatar_data is not None and time.monotonic() < self.session_expires
+
+    def invalidate(self, reason: str) -> None:
+        if self.liveavatar_data:
+            logger.info("[session] Invalidated: %s", reason)
+        self.liveavatar_data = None
+        self.session_expires = 0.0
+        self.speak_ws = None
 
 
-def _invalidate_session(reason: str) -> None:
-    """Clear the cached session and persistent WS so the next request starts fresh."""
-    global _liveavatar_session, _liveavatar_session_expires, _speak_ws
-    if _liveavatar_session:
-        logger.info("[session] Cache invalidated: %s", reason)
-    _liveavatar_session = None
-    _liveavatar_session_expires = 0.0
-    _speak_ws = None
+_user_sessions: dict[str, UserSession] = {}
+_user_sessions_lock: asyncio.Lock = asyncio.Lock()
+_LIVEAVATAR_SESSION_TTL: float = 1800.0  # 30 min conservative TTL
 
 
-async def _avatar_ws_loop(ws_url: str, session_id: str) -> None:
+async def _get_or_create_user_session(sid: str) -> UserSession:
+    """Return the UserSession for this browser tab, creating one if needed."""
+    async with _user_sessions_lock:
+        if sid not in _user_sessions:
+            if len(_user_sessions) >= MAX_SESSIONS:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Maximum concurrent sessions reached. Try again later.",
+                )
+            _user_sessions[sid] = UserSession()
+        entry = _user_sessions[sid]
+    entry.last_active = time.monotonic()
+    return entry
+
+
+async def _evict_idle_sessions() -> None:
+    """Background task: remove sessions idle > _SESSION_IDLE_TTL every 5 minutes."""
+    while True:
+        await asyncio.sleep(300)
+        now = time.monotonic()
+        async with _user_sessions_lock:
+            to_remove = [
+                sid for sid, e in _user_sessions.items()
+                if (now - e.last_active) > _SESSION_IDLE_TTL
+            ]
+            for sid in to_remove:
+                entry = _user_sessions.pop(sid)
+                if entry.ws_task and not entry.ws_task.done():
+                    entry.ws_task.cancel()
+        if to_remove:
+            logger.info("[evict] Removed %d idle sessions", len(to_remove))
+
+
+async def _avatar_ws_loop(ws_url: str, liveavatar_session_id: str, entry: UserSession) -> None:
     """
-    Maintains ONE persistent WebSocket for the lifetime of the avatar session.
+    Maintains a persistent WebSocket for one UserSession.
     Serves two purposes:
       1. Keep-alive — sends session.keep_alive every 3 minutes.
-      2. Speak channel — _speak_on_avatar reuses _speak_ws to send agent.speak
+      2. Speak channel — _speak_on_avatar reuses entry.speak_ws to send agent.speak
          frames without opening a new connection per call.
     """
-    global _speak_ws
-    logger.info("[avatar_ws] Connecting persistent WebSocket for session %s", session_id)
+    logger.info("[avatar_ws] Connecting WebSocket for session %s", liveavatar_session_id)
     try:
         async with websockets.connect(ws_url) as ws:
-            _speak_ws = ws
-            logger.info("[avatar_ws] Persistent WebSocket ready")
+            entry.speak_ws = ws
+            logger.info("[avatar_ws] WebSocket ready for session %s", liveavatar_session_id)
             while True:
                 try:
-                    # Wait up to 3 minutes for an inbound event before sending keep-alive
                     async with asyncio.timeout(180):
                         raw = await ws.recv()
                         msg = json.loads(raw)
@@ -649,79 +807,98 @@ async def _avatar_ws_loop(ws_url: str, session_id: str) -> None:
                         logger.debug("[avatar_ws] event: %s", event_type)
                         if event_type == "session.stopped":
                             logger.info(
-                                "[avatar_ws] Session %s stopped (%s) — invalidating cache",
-                                session_id,
+                                "[avatar_ws] Session %s stopped (%s) — invalidating",
+                                liveavatar_session_id,
                                 msg.get("data", {}).get("end_reason", "unknown"),
                             )
-                            _invalidate_session("session.stopped received")
+                            entry.invalidate("session.stopped received")
                             return
                 except TimeoutError:
-                    # No event in 3 min → send keep-alive
                     await ws.send(json.dumps({
                         "type": "session.keep_alive",
                         "event_id": str(uuid.uuid4()),
                     }))
-                    logger.debug("[avatar_ws] keep-alive sent for session %s", session_id)
+                    logger.debug("[avatar_ws] keep-alive sent for session %s", liveavatar_session_id)
     except Exception as exc:
-        logger.warning("[avatar_ws] WebSocket closed for session %s: %s", session_id, exc)
-        _invalidate_session(f"WebSocket closed: {exc}")
+        logger.warning("[avatar_ws] WebSocket closed for session %s: %s", liveavatar_session_id, exc)
+        entry.invalidate(f"WebSocket closed: {exc}")
     finally:
-        _speak_ws = None
+        entry.speak_ws = None
 
 
-async def _get_or_create_liveavatar_session() -> dict[str, Any]:
+async def _get_or_create_liveavatar_session(entry: UserSession) -> dict[str, Any]:
     """
-    Returns a cached LiveAvatar session or creates a new one.
+    Returns a cached LiveAvatar session for this UserSession, or creates a new one.
 
     Flow (per LiveAvatar v1 API docs):
-      1. POST /v1/sessions/token  — authenticates with X-Api-Key (UUID),
-         returns a short-lived JWT session_token plus a session_id.
-      2. POST /v1/sessions/start  — authenticates with Bearer <session_token>,
-         returns livekit_url + livekit_client_token for the WebRTC room.
+      1. POST /v1/sessions/token — authenticates with X-Api-Key, returns JWT + session_id.
+      2. POST /v1/sessions/start — authenticates with Bearer JWT, returns LiveKit credentials.
 
-    The result is cached in memory.  A 401/403 from either call clears the
-    cache so the next request retries from scratch.
+    The result is cached on entry.liveavatar_data.
     """
-    global _liveavatar_session, _liveavatar_session_expires
-
     now = time.monotonic()
-    async with _liveavatar_session_lock:
-        if _liveavatar_session and now < _liveavatar_session_expires:
-            logger.info("Reusing cached LiveAvatar session %s", _liveavatar_session["session_id"])
-            return _liveavatar_session
+    async with entry.session_lock:
+        if entry.is_valid():
+            logger.info("Reusing cached LiveAvatar session %s", entry.liveavatar_data["session_id"])  # type: ignore[index]
+            return entry.liveavatar_data  # type: ignore[return-value]
 
         base_headers = {
             "Content-Type": "application/json",
             "accept": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            # Step 1 — exchange API key (UUID) for a JWT session_token
-            token_response = await client.post(
-                f"{LIVEAVATAR_BASE_URL}/v1/sessions/token",
-                headers={**base_headers, "X-Api-Key": LIVEAVATAR_API_KEY},
-                json={
-                    "avatar_id": LIVEAVATAR_AVATAR_ID,
-                    "mode": LIVEAVATAR_SESSION_MODE,
-                    "is_sandbox": LIVEAVATAR_IS_SANDBOX,
-                },
-            )
-            token_response.raise_for_status()
-            token_data = token_response.json()["data"]
-            session_token: str = token_data["session_token"]
-            session_id: str = token_data["session_id"]
-            logger.info("LiveAvatar session token obtained for session %s", session_id)
+        async def _fetch_token() -> tuple[str, str]:
+            """Exchange API key for a fresh JWT session_token + session_id."""
+            async with httpx.AsyncClient(timeout=20.0) as c:
+                r = await c.post(
+                    f"{LIVEAVATAR_BASE_URL}/v1/sessions/token",
+                    headers={**base_headers, "X-Api-Key": LIVEAVATAR_API_KEY},
+                    json={
+                        "avatar_id": LIVEAVATAR_AVATAR_ID,
+                        "mode": LIVEAVATAR_SESSION_MODE,
+                        "is_sandbox": LIVEAVATAR_IS_SANDBOX,
+                    },
+                )
+                r.raise_for_status()
+                d = r.json()["data"]
+                logger.info("LiveAvatar token obtained for session %s", d["session_id"])
+                return d["session_token"], d["session_id"]
 
-            # Step 2 — start the session with the JWT to get LiveKit credentials
-            start_response = await client.post(
-                f"{LIVEAVATAR_BASE_URL}/v1/sessions/start",
-                headers={**base_headers, "Authorization": f"Bearer {session_token}"},
-                json={},
-            )
-            start_response.raise_for_status()
-            start_data = start_response.json()["data"]
-            logger.info("LiveAvatar session started: %s", start_data.get("session_id", session_id))
+        # Step 1 — get initial token.
+        session_token, session_id = await _fetch_token()
 
+        # Step 2 — start the session (provisions WebRTC infra; may take 30-40 s).
+        # On a 500 the session_id is usually already active from a stale server-side
+        # state (common in sandbox after a crash/restart).  Retry once with a brand-new
+        # token (→ new session_id) after a brief pause.
+        MAX_START_ATTEMPTS = 2
+        start_data: dict[str, Any] | None = None
+        for attempt in range(1, MAX_START_ATTEMPTS + 1):
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                logger.info(
+                    "Starting LiveAvatar session %s (attempt %d/%d, up to 60 s)…",
+                    session_id, attempt, MAX_START_ATTEMPTS,
+                )
+                start_response = await client.post(
+                    f"{LIVEAVATAR_BASE_URL}/v1/sessions/start",
+                    headers={**base_headers, "Authorization": f"Bearer {session_token}"},
+                    json={},
+                )
+                if start_response.status_code == 500 and attempt < MAX_START_ATTEMPTS:
+                    logger.warning(
+                        "LiveAvatar /start returned 500 for session %s — "
+                        "fetching a fresh token and retrying in 3 s…",
+                        session_id,
+                    )
+                    await asyncio.sleep(3)
+                    session_token, session_id = await _fetch_token()
+                    continue
+                start_response.raise_for_status()
+                start_data = start_response.json()["data"]
+                logger.info("LiveAvatar session started: %s", start_data.get("session_id", session_id))
+                break
+
+        assert start_data is not None  # loop always raises or assigns
         result: dict[str, Any] = {
             "session_id": start_data.get("session_id") or session_id,
             "livekit_url": start_data["livekit_url"],
@@ -733,16 +910,15 @@ async def _get_or_create_liveavatar_session() -> dict[str, Any]:
             result["session_id"],
             result["ws_url"] or "<empty — LITE ws_url not returned>",
         )
-        _liveavatar_session = result
-        _liveavatar_session_expires = now + _LIVEAVATAR_SESSION_TTL
+        entry.liveavatar_data = result
+        entry.session_expires = now + _LIVEAVATAR_SESSION_TTL
 
-        # Start persistent WS loop in the background if ws_url is available
+        # Start per-user persistent WS loop if ws_url is available
         if result["ws_url"]:
-            global _avatar_ws_task
-            if _avatar_ws_task and not _avatar_ws_task.done():
-                _avatar_ws_task.cancel()
-            _avatar_ws_task = asyncio.create_task(
-                _avatar_ws_loop(result["ws_url"], result["session_id"])
+            if entry.ws_task and not entry.ws_task.done():
+                entry.ws_task.cancel()
+            entry.ws_task = asyncio.create_task(
+                _avatar_ws_loop(result["ws_url"], result["session_id"], entry)
             )
 
         return result
@@ -752,11 +928,10 @@ async def _get_or_create_liveavatar_session() -> dict[str, Any]:
     "/session",
     summary="Get a LiveAvatar WebRTC session",
 )
-async def get_session() -> dict[str, Any]:
+async def get_session(x_session_id: str = Header(default="anonymous")) -> dict[str, Any]:
     """
-    Returns LiveKit credentials for the shared avatar session, creating one
-    if none is cached.  Falls back to a mock session for local development
-    when LIVEAVATAR_API_KEY is not set.
+    Returns LiveKit credentials for the caller's per-user avatar session.
+    Falls back to a mock session for local development when LIVEAVATAR_API_KEY is not set.
 
     Security: target hostnames are hard-coded constants — never derived from
     user input, preventing Server-Side Request Forgery (SSRF).
@@ -772,12 +947,14 @@ async def get_session() -> dict[str, Any]:
         }
 
     try:
-        return await _get_or_create_liveavatar_session()
+        sid = x_session_id if _UUID_RE.match(x_session_id) else "anonymous"
+        entry = await _get_or_create_user_session(sid)
+        return await _get_or_create_liveavatar_session(entry)
 
     except httpx.HTTPStatusError as exc:
         # Invalidate cache on auth errors so the next request retries cleanly
         if exc.response.status_code in (401, 403):
-            _invalidate_session(f"HTTP {exc.response.status_code} from LiveAvatar")
+            entry.invalidate(f"HTTP {exc.response.status_code} from LiveAvatar")  # type: ignore[possibly-undefined]
         logger.error(
             "LiveAvatar API returned %d: %s",
             exc.response.status_code,
@@ -789,10 +966,14 @@ async def get_session() -> dict[str, Any]:
         ) from exc
 
     except httpx.RequestError as exc:
-        logger.error("Unable to reach LiveAvatar API: %s", exc)
+        logger.error(
+            "Unable to reach LiveAvatar API (%s): %s",
+            type(exc).__name__, exc,
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not reach the LiveAvatar API. Check network connectivity.",
+            detail=f"Could not reach the LiveAvatar API ({type(exc).__name__}). Check network connectivity.",
         ) from exc
 
 

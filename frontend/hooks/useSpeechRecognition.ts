@@ -3,7 +3,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 
 // ── Browser API type declarations ────────────────────────────────────────────
-// webkitSpeechRecognition is not in the standard TypeScript DOM lib.
 
 interface SpeechRecognitionResultItem {
   readonly transcript: string;
@@ -48,7 +47,7 @@ interface SpeechRecognitionInstance extends EventTarget {
 // ── Hook interface ────────────────────────────────────────────────────────────
 
 interface UseSpeechRecognitionOptions {
-  /** Called once with the final transcript when the user stops speaking. */
+  /** Called once with the final transcript when a complete utterance is detected. */
   onResult: (transcript: string) => void;
   /** Called when the browser reports a recognition error. */
   onError?: (error: string) => void;
@@ -56,17 +55,25 @@ interface UseSpeechRecognitionOptions {
   lang?: string;
 }
 
-interface UseSpeechRecognitionReturn {
+export interface UseSpeechRecognitionReturn {
   /** Whether the microphone is currently active. */
   isListening: boolean;
-  /** Last captured transcript (cleared when a new session starts). */
+  /** Whether continuous mode is currently active. */
+  isContinuous: boolean;
+  /** Live partial transcript (interim, before isFinal). Continuous mode only. */
+  interimTranscript: string;
+  /** Last finalised transcript. */
   transcript: string;
   /** False on Firefox or when running on the server. */
   isSupported: boolean;
-  /** Start a new recognition session. */
+  /** Start a single push-to-talk session. */
   startListening: () => void;
-  /** Stop the current session (triggers onResult if anything was captured). */
+  /** Stop the current push-to-talk session. */
   stopListening: () => void;
+  /** Toggle continuous listening mode on. Auto-restarts after each utterance. */
+  startContinuous: () => void;
+  /** Stop continuous listening mode. */
+  stopContinuous: () => void;
 }
 
 // ── Hook implementation ───────────────────────────────────────────────────────
@@ -77,9 +84,19 @@ export function useSpeechRecognition({
   lang = "en-US",
 }: UseSpeechRecognitionOptions): UseSpeechRecognitionReturn {
   const [isListening, setIsListening] = useState(false);
+  const [isContinuous, setIsContinuous] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [isSupported, setIsSupported] = useState(false); // false on server, updated after mount
+  const [interimTranscript, setInterimTranscript] = useState("");
+  const [isSupported, setIsSupported] = useState(false);
+
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const shouldRestartRef = useRef(false); // controls continuous auto-restart
+  const onResultRef = useRef(onResult);
+  const onErrorRef = useRef(onError);
+
+  // Keep refs up to date so callbacks inside recognition handlers see latest values
+  useEffect(() => { onResultRef.current = onResult; }, [onResult]);
+  useEffect(() => { onErrorRef.current = onError; }, [onError]);
 
   useEffect(() => {
     setIsSupported(
@@ -88,63 +105,123 @@ export function useSpeechRecognition({
     );
   }, []);
 
+  const _buildRecognition = useCallback(
+    (continuous: boolean): SpeechRecognitionInstance => {
+      const Ctor = (
+        (window as unknown as Record<string, unknown>).SpeechRecognition ??
+        (window as unknown as Record<string, unknown>).webkitSpeechRecognition
+      ) as new () => SpeechRecognitionInstance;
+
+      const r = new Ctor();
+      r.lang = lang;
+      r.continuous = continuous;
+      r.interimResults = continuous; // only need interim in continuous mode
+      r.maxAlternatives = 1;
+
+      r.onstart = () => {
+        setIsListening(true);
+        setTranscript("");
+        setInterimTranscript("");
+      };
+
+      r.onresult = (event: SpeechRecognitionEvent) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          const text = result[0]?.transcript ?? "";
+          if (result.isFinal) {
+            const finalText = text.trim();
+            if (finalText) {
+              setTranscript(finalText);
+              setInterimTranscript("");
+              onResultRef.current(finalText);
+            }
+          } else {
+            interim += text;
+          }
+        }
+        if (interim) setInterimTranscript(interim);
+      };
+
+      r.onerror = (event: SpeechRecognitionErrorEvent) => {
+        if (event.error !== "no-speech" && event.error !== "aborted") {
+          onErrorRef.current?.(event.error);
+        }
+        setIsListening(false);
+        setInterimTranscript("");
+      };
+
+      r.onend = () => {
+        setIsListening(false);
+        setInterimTranscript("");
+        // Auto-restart in continuous mode unless explicitly stopped
+        if (shouldRestartRef.current) {
+          try {
+            recognitionRef.current?.start();
+            setIsListening(true);
+          } catch {
+            // Ignore: can happen if the component is unmounting
+          }
+        }
+      };
+
+      return r;
+    },
+    [lang],
+  );
+
   const startListening = useCallback(() => {
     if (!isSupported) return;
-
-    // Abort any in-progress session before starting a new one
     recognitionRef.current?.abort();
-
-    const Ctor = (
-      (window as unknown as Record<string, unknown>).SpeechRecognition ??
-      (window as unknown as Record<string, unknown>).webkitSpeechRecognition
-    ) as new () => SpeechRecognitionInstance;
-
-    const recognition = new Ctor();
-    recognition.lang = lang;
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.continuous = false;
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setTranscript("");
-    };
-
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const text = event.results[0]?.[0]?.transcript ?? "";
-      setTranscript(text);
-      if (text.trim()) {
-        onResult(text.trim());
-      }
-    };
-
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      // "no-speech" is normal — don't surface it as an error to the user
-      if (event.error !== "no-speech") {
-        onError?.(event.error);
-      }
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-  }, [isSupported, lang, onResult, onError]);
+    shouldRestartRef.current = false;
+    const r = _buildRecognition(false);
+    recognitionRef.current = r;
+    r.start();
+  }, [isSupported, _buildRecognition]);
 
   const stopListening = useCallback(() => {
+    shouldRestartRef.current = false;
     recognitionRef.current?.stop();
     setIsListening(false);
   }, []);
 
-  // Abort on unmount to avoid dangling microphone permissions
+  const startContinuous = useCallback(() => {
+    if (!isSupported) return;
+    recognitionRef.current?.abort();
+    shouldRestartRef.current = true;
+    setIsContinuous(true);
+    const r = _buildRecognition(true);
+    recognitionRef.current = r;
+    r.start();
+  }, [isSupported, _buildRecognition]);
+
+  const stopContinuous = useCallback(() => {
+    shouldRestartRef.current = false;
+    setIsContinuous(false);
+    recognitionRef.current?.stop();
+    setIsListening(false);
+    setInterimTranscript("");
+  }, []);
+
+  // Abort on unmount
   useEffect(() => {
     return () => {
+      shouldRestartRef.current = false;
       recognitionRef.current?.abort();
     };
   }, []);
 
-  return { isListening, transcript, isSupported, startListening, stopListening };
+  return {
+    isListening,
+    isContinuous,
+    interimTranscript,
+    transcript,
+    isSupported,
+    startListening,
+    stopListening,
+    startContinuous,
+    stopContinuous,
+  };
 }
+
+

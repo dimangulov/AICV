@@ -2,7 +2,7 @@ Damir Imangulov — Solution Architect | Senior Full-Stack Engineer
 
 PROFESSIONAL SUMMARY
 
-I am Damir Imangulov, a Solution Architect with a deep-seated focus on cloud-native solution design. I don't just write code — I build scalable ecosystems. By architecting robust backends in .NET and Python and crafting seamless Angular frontends, I bridge the gap between complex infrastructure and the end-user. Whether it's optimizing a cloud environment for high availability or designing a sleek, reactive UI, my goal is to ensure that technical complexity never gets in the way of a great user experience.
+I am Damir Imangulov, a Solution Architect with a deep-seated focus on cloud-native solution design. I don't just write code — I build scalable ecosystems. By architecting robust backends in .NET and Python and crafting seamless React frontends, I bridge the gap between complex infrastructure and the end-user. Whether it's optimizing a cloud environment for high availability or designing a sleek, reactive UI, my goal is to ensure that technical complexity never gets in the way of a great user experience.
 
 I bring 10+ years of experience designing and delivering large-scale distributed systems across cloud, edge, and on-premises environments. I specialize in clean architecture, SOLID principles, event-driven systems, and cross-functional technical leadership. I thrive in ambiguous, high-stakes environments and have a consistent track record of turning complex technical challenges into robust, maintainable systems.
 

@@ -3,10 +3,16 @@
  * All functions throw a descriptive Error on non-2xx responses.
  */
 
-import type { AskResponse, SessionResponse } from "@/types";
+import type { AskResponse, HistoryMessage, SessionResponse } from "@/types";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+/** Tab-scoped session ID — generated once per page load, stable across re-renders. */
+export let sessionId = "";
+export function initSessionId(id: string) {
+  sessionId = id;
+}
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -26,13 +32,63 @@ async function handleResponse<T>(res: Response): Promise<T> {
  * POST /ask
  * Sends a question to the RAG pipeline and returns the grounded answer.
  */
-export async function askQuestion(question: string): Promise<AskResponse> {
+export async function askQuestion(
+  question: string,
+  history: HistoryMessage[] = [],
+): Promise<AskResponse> {
   const res = await fetch(`${API_BASE_URL}/ask`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
+    headers: { "Content-Type": "application/json", "X-Session-ID": sessionId },
+    body: JSON.stringify({ question, history }),
   });
   return handleResponse<AskResponse>(res);
+}
+
+/**
+ * POST /ask/stream
+ * Streams the answer token-by-token via SSE.
+ * Calls onToken for each token, onDone(latencyMs) when complete.
+ */
+export async function askQuestionStream(
+  question: string,
+  history: HistoryMessage[],
+  onToken: (token: string) => void,
+  onDone: (latencyMs: number) => void,
+  onError: (msg: string) => void,
+): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/ask/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Session-ID": sessionId },
+    body: JSON.stringify({ question, history }),
+  });
+  if (!res.ok || !res.body) {
+    let detail = `HTTP ${res.status}`;
+    try { const b = await res.json(); detail = b?.detail ?? detail; } catch { /* ignore */ }
+    onError(detail);
+    return;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const payload = line.slice(6);
+      if (payload.startsWith("[DONE]")) {
+        const ms = parseInt(payload.slice(7), 10);
+        onDone(isNaN(ms) ? 0 : ms);
+      } else if (payload.startsWith("[ERROR]")) {
+        try { onError(JSON.parse(payload.slice(8))); } catch { onError(payload); }
+      } else {
+        try { onToken(JSON.parse(payload)); } catch { onToken(payload); }
+      }
+    }
+  }
 }
 
 /**
@@ -40,7 +96,9 @@ export async function askQuestion(question: string): Promise<AskResponse> {
  * Fetches a LiveAvatar WebRTC session (real or mock depending on server config).
  */
 export async function getSession(): Promise<SessionResponse> {
-  const res = await fetch(`${API_BASE_URL}/session`);
+  const res = await fetch(`${API_BASE_URL}/session`, {
+    headers: { "X-Session-ID": sessionId },
+  });
   return handleResponse<SessionResponse>(res);
 }
 
@@ -51,7 +109,7 @@ export async function getSession(): Promise<SessionResponse> {
 export async function speakText(text: string): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/speak`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Session-ID": sessionId },
     body: JSON.stringify({ text }),
   });
   await handleResponse<{ status: string }>(res);

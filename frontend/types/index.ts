@@ -16,8 +16,23 @@ export interface LogEntry {
   message: string;
 }
 
+/** One turn of conversation history sent to the backend. */
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** One displayed message in the chat thread. */
+export interface ConversationMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  latency_ms?: number;
+}
+
 export interface AskRequest {
   question: string;
+  history?: HistoryMessage[];
 }
 
 export interface AskResponse {

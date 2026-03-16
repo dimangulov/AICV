@@ -145,7 +145,7 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
             <div className="w-40 h-40 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-600/20 border border-blue-500/20 flex items-center justify-center">
               <div className="w-28 h-28 rounded-full bg-gradient-to-br from-blue-500/30 to-purple-600/30 border border-blue-500/30 flex items-center justify-center">
                 <span className="text-4xl font-bold text-blue-400/60 select-none">
-                  AM
+                  DI
                 </span>
               </div>
             </div>

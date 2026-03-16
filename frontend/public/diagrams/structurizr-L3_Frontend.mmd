@@ -1,0 +1,34 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["Component View: Digital Twin CV - Next.js Frontend"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    subgraph 2 ["Digital Twin CV"]
+      style 2 fill:#ffffff,stroke:#152860,color:#152860
+
+      subgraph 3 ["Next.js Frontend"]
+        style 3 fill:#ffffff,stroke:#152860,color:#152860
+
+        4("<div style='font-weight: bold'>VideoPlayer</div><div style='font-size: 70%; margin-top: 0px'>[Component: Manages the LiveKit WebRTC room and renders the avatar video stream. Falls back to a mock canvas stream in local-dev mode.]</div><div style='font-size: 80%; margin-top:10px'>React Component</div>")
+        style 4 fill:#1e293b,stroke:#151c29,color:#e2e8f0
+        5("<div style='font-weight: bold'>ChatInterface</div><div style='font-size: 70%; margin-top: 0px'>[Component: Handles text input and push-to-talk via the Web Speech API. Calls POST /ask on submit.]</div><div style='font-size: 80%; margin-top:10px'>React Component</div>")
+        style 5 fill:#1e293b,stroke:#151c29,color:#e2e8f0
+        6("<div style='font-weight: bold'>DevConsole</div><div style='font-size: 70%; margin-top: 0px'>[Component: Real-time log panel exposing each RAG pipeline step (retrieve, embed, infer).]</div><div style='font-size: 80%; margin-top:10px'>React Component</div>")
+        style 6 fill:#1e293b,stroke:#151c29,color:#e2e8f0
+        7("<div style='font-weight: bold'>useSpeechRecognition</div><div style='font-size: 70%; margin-top: 0px'>[Component: Wraps the browser Web Speech API; provides transcript and listening state.]</div><div style='font-size: 80%; margin-top:10px'>React Hook</div>")
+        style 7 fill:#1e293b,stroke:#151c29,color:#e2e8f0
+        8("<div style='font-weight: bold'>API Client</div><div style='font-size: 70%; margin-top: 0px'>[Component: Typed wrapper around /ask, /session, /health, and /speak endpoints.]</div><div style='font-size: 80%; margin-top:10px'>TypeScript / fetch</div>")
+        style 8 fill:#1e293b,stroke:#151c29,color:#e2e8f0
+      end
+
+      9("<div style='font-weight: bold'>FastAPI Backend</div><div style='font-size: 70%; margin-top: 0px'>[Container: Docker / Azure Container Apps]</div><div style='font-size: 80%; margin-top:10px'>Python 3.12</div>")
+      style 9 fill:#1e3a8a,stroke:#152860,color:#f1f5f9
+    end
+
+    4-. "<div>getSession()</div><div style='font-size: 70%'></div>" .->8
+    5-. "<div>askQuestion(question)</div><div style='font-size: 70%'></div>" .->8
+    5-. "<div>uses transcript</div><div style='font-size: 70%'></div>" .->7
+    8-. "<div>HTTP fetch</div><div style='font-size: 70%'></div>" .->9
+
+  end

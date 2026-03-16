@@ -1,0 +1,23 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["System Context View: Digital Twin CV"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    1["<div style='font-weight: bold'>Recruiter / Visitor</div><div style='font-size: 70%; margin-top: 0px'>[Person]</div><div style='font-size: 80%; margin-top:10px'>Explores the interactive<br />digital twin CV portfolio</div>"]
+    style 1 fill:#1d4ed8,stroke:#143697,color:#ffffff
+    2("<div style='font-weight: bold'>Digital Twin CV</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>AI-powered interactive<br />portfolio. A photorealistic<br />WebRTC avatar answers<br />natural-language questions<br />via a RAG pipeline over a<br />curated CV knowledge base.</div>")
+    style 2 fill:#1e3a8a,stroke:#152860,color:#f1f5f9
+    20("<div style='font-weight: bold'>Ollama</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Local LLM runtime. Serves<br />llama3.2 (3B) for chat<br />completion and<br />nomic-embed-text for 768-dim<br />embeddings. All inference<br />stays on-device — no CV data<br />leaves the machine.</div>")
+    style 20 fill:#374151,stroke:#262d38,color:#f9fafb
+    21("<div style='font-weight: bold'>LiveAvatar.com</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Commercial SaaS. Provides<br />photorealistic digital-twin<br />avatar streaming via a hosted<br />LiveKit room (WebRTC / H.264<br />video / Opus audio).</div>")
+    style 21 fill:#374151,stroke:#262d38,color:#f9fafb
+    22("<div style='font-weight: bold'>LiveKit Cloud</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Open-source WebRTC<br />infrastructure used by<br />LiveAvatar.com for signalling<br />and media relay (ICE / STUN /<br />TURN).</div>")
+    style 22 fill:#374151,stroke:#262d38,color:#f9fafb
+
+    1-. "<div>Asks questions about the<br />candidate</div><div style='font-size: 70%'>[HTTPS]</div>" .->2
+    2-. "<div>Chat completion and embedding<br />generation</div><div style='font-size: 70%'>[HTTP REST]</div>" .->20
+    2-. "<div>Session creation proxy</div><div style='font-size: 70%'>[HTTPS]</div>" .->21
+    2-. "<div>WebRTC signalling and media<br />stream</div><div style='font-size: 70%'>[WSS / SRTP]</div>" .->22
+
+  end

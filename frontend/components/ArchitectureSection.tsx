@@ -36,7 +36,7 @@ const COMPONENTS: ArchComponent[] = [
     subtitle: "Browser / Vercel",
     description:
       "React 19 application with a WebRTC avatar player, Push-to-Talk using the Web Speech API, a text chat input, and a live Dev Console log panel.",
-    tags: ["Next.js 15", "React 19", "Tailwind CSS", "Lucide-react", "WebRTC Client", "Web Speech API"],
+    tags: ["Next.js 16", "React 19", "Tailwind CSS", "Lucide-react", "WebRTC Client", "Web Speech API", "SSE Streaming"],
     colorScheme: "blue",
     layer: "Frontend",
   },
@@ -46,8 +46,8 @@ const COMPONENTS: ArchComponent[] = [
     title: "FastAPI Backend",
     subtitle: "Python 3.12 / Docker",
     description:
-      "Orchestrates the RAG pipeline with LangChain LCEL. Exposes /ask for question answering and /session as a LiveAvatar proxy. Built-in Pydantic validation and OpenAPI docs.",
-    tags: ["FastAPI", "LangChain LCEL", "Python 3.12", "Pydantic v2", "httpx"],
+      "Orchestrates the RAG pipeline with LangChain LCEL. Streams answers token-by-token via SSE (/ask/stream). Synthesises speech via Azure Speech TTS (gTTS fallback) and sends audio to the avatar over a persistent WebSocket.",
+    tags: ["FastAPI", "LangChain LCEL", "Python 3.12", "Pydantic v2", "SSE", "Azure Speech", "httpx"],
     colorScheme: "purple",
     layer: "Backend",
   },
@@ -57,8 +57,8 @@ const COMPONENTS: ArchComponent[] = [
     title: "Ollama LLM",
     subtitle: "Local Inference",
     description:
-      "Runs llama3.2 (3B) for chat completion and nomic-embed-text for 768-dimensional embeddings. No data leaves the machine — full privacy by design.",
-    tags: ["llama3.2", "nomic-embed-text", "Local / GPU", "OpenAI-compatible API"],
+      "Dual-mode LLM backend: Ollama (llama3.2 + nomic-embed-text) for fully local inference, or Azure OpenAI (gpt-4o-mini + text-embedding-3-small) for cloud deployment. Switch via LLM_PROVIDER env var.",
+    tags: ["llama3.2", "nomic-embed-text", "Ollama (local)", "Azure OpenAI (cloud)", "gpt-4o-mini"],
     colorScheme: "orange",
     layer: "AI",
   },
@@ -104,13 +104,13 @@ const FLOW_STEPS = [
   { step: 2, icon: Server,    color: "text-purple-400", text: "FastAPI receives POST /ask and invokes the LCEL chain" },
   { step: 3, icon: Database,  color: "text-green-400",  text: "Qdrant returns the 3 most relevant bio.txt chunks" },
   { step: 4, icon: Cpu,       color: "text-orange-400", text: "llama3.2 (Ollama) generates a grounded answer" },
-  { step: 5, icon: Globe,     color: "text-blue-400",   text: "Answer is displayed; avatar delivers the response (future: TTS)" },
+  { step: 5, icon: Globe,     color: "text-blue-400",   text: "Tokens stream to the browser via SSE; each sentence is synthesised by Azure Speech TTS and spoken by the avatar" },
 ];
 
 // ── Design principles ─────────────────────────────────────────────────────────
 
 const PRINCIPLES = [
-  { icon: Lock,      title: "Privacy-First",    desc: "LLM runs locally — no CV data sent to cloud AI" },
+  { icon: Lock,      title: "Privacy-First",    desc: "Ollama mode runs fully offline; Azure mode uses Managed Identity — no plaintext secrets in code" },
   { icon: Zap,       title: "RAG-Grounded",     desc: "Answers are sourced from bio.txt; no hallucination" },
   { icon: Layers,    title: "Modular LCEL",     desc: "LangChain chain is composable and easy to extend" },
   { icon: GitBranch, title: "Observable",       desc: "Dev Console exposes every pipeline step in real time" },

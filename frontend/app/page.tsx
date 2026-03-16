@@ -1,22 +1,20 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import VideoPlayer from "@/components/VideoPlayer";
-import ChatInterface from "@/components/ChatInterface";
+import ChatInterface, { type ChatInterfaceHandle } from "@/components/ChatInterface";
 import DevConsole from "@/components/DevConsole";
 import ArchitectureSection from "@/components/ArchitectureSection";
 import DesignSection from "@/components/DesignSection";
 import C4DiagramsSection from "@/components/C4DiagramsSection";
-import { speakText } from "@/lib/api";
+import { Github } from "lucide-react";
+import { speakText, initSessionId } from "@/lib/api";
 import type { LogEntry } from "@/types";
 
 const AVATAR_INTRO =
   "Meet Damir Imangulov. He is a Senior Full-Stack Engineer with a deep-seated focus on " +
-  "cloud-native solution design. Damir doesn't just write code; he builds scalable ecosystems. " +
-  "By architecting robust backends in .NET and Python and crafting seamless frontends, he bridges " +
-  "the gap between complex infrastructure and the end-user. Whether it's optimizing a cloud " +
-  "environment for high availability or designing a sleek, reactive UI, Damir's goal is to ensure " +
-  "that technical complexity never gets in the way of a great user experience.";
+  "cloud-native solution design." +
+  "Ask me anyhting about backends, cloud architecture, or technical challenges ";
 
 let _logId = 0;
 
@@ -32,6 +30,14 @@ const TABS: { id: Tab; label: string }[] = [
 export default function Home() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>("chat");
+  const introSpoken = useRef(false);
+  const chatRef = useRef<ChatInterfaceHandle>(null);
+
+  // Generate a stable per-tab UUID and register it with the API client
+  useEffect(() => {
+    const id = crypto.randomUUID();
+    initSessionId(id);
+  }, []);
 
   const addLog = useCallback(
     (message: string, level: LogEntry["level"] = "info", step = 0) => {
@@ -51,19 +57,26 @@ export default function Home() {
     <div className="min-h-screen lg:h-screen lg:overflow-hidden flex flex-col lg:flex-row bg-gray-950">
 
       {/* ── Left column — Digital Twin Video (always visible) ────── */}
-      <div className="w-full lg:w-1/2 h-[50vh] lg:h-full flex-shrink-0 relative bg-gradient-to-br from-gray-900 via-gray-950 to-slate-900">
+      <div className="w-full lg:w-2/5 h-[45vh] lg:h-full flex-shrink-0 relative bg-gradient-to-br from-gray-900 via-gray-950 to-slate-900">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(59,130,246,0.08)_0%,transparent_70%)] pointer-events-none" />
         <VideoPlayer
           onLog={(msg, lvl) => addLog(msg, lvl ?? "info")}
           onConnected={() => {
+            if (introSpoken.current) return;
+            introSpoken.current = true;
             addLog("[Avatar] Playing intro...", "info");
-            //speakText(AVATAR_INTRO).catch(() => {});
+            speakText(AVATAR_INTRO)
+              .catch(() => {})
+              .finally(() => {
+                // Auto-start continuous listening after intro finishes
+                chatRef.current?.startContinuous();
+              });
           }}
         />
       </div>
 
       {/* ── Right column — Tabbed content (scrollable) ───────────── */}
-      <div className="w-full lg:w-1/2 flex flex-col lg:h-full border-l border-gray-800">
+      <div className="w-full lg:w-3/5 flex flex-col lg:h-full border-l border-gray-800">
 
         {/* Tab navigation */}
         <nav className="flex-shrink-0 bg-gray-950/90 backdrop-blur border-b border-gray-800 px-4 flex items-center h-12 gap-1 overflow-x-auto sticky top-0 z-10">
@@ -107,9 +120,18 @@ export default function Home() {
                   </div>
                   <p className="text-gray-400 text-sm mt-2 max-w-md leading-relaxed">
                     Meet Damir — he builds scalable ecosystems, not just code. Ask his
-                    AI digital twin about .NET &amp; Python backends, Angular frontends,
+                    AI digital twin about .NET &amp; Python backends, React frontends,
                     cloud-native architecture, or any technical challenge.
                   </p>
+                  <a
+                    href="https://github.com/dimangulov/AICV"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 mt-3 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 hover:border-gray-500 hover:bg-gray-700 text-gray-300 hover:text-white text-xs font-medium transition-all"
+                  >
+                    <Github className="w-4 h-4" />
+                    dimangulov/AICV
+                  </a>
                 </div>
               </header>
 
@@ -124,7 +146,7 @@ export default function Home() {
                 ))}
               </div>
 
-              <ChatInterface onLog={addLog} />
+              <ChatInterface ref={chatRef} onLog={addLog} />
               <DevConsole logs={logs} />
             </div>
           )}

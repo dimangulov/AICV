@@ -5,10 +5,28 @@
 @layer base {
   :root {
     color-scheme: dark;
+
+    /* ── C4 Diagram Theme ─────────────────────────────────────────────── */
+    /* Change these to retheme all exported C4 SVG diagrams.                */
+    /* SVGs are loaded inline, so page CSS variables apply directly.       */
+    --c4-person:    #1d4ed8;  /* Person shape fill                        */
+    --c4-system:    #1e3a8a;  /* Software System / Container fill         */
+    --c4-component: #1e293b;  /* Component fill                           */
+    --c4-database:  #166534;  /* Database / ContainerDb fill              */
+    --c4-external:  #374151;  /* External Software System fill            */
+    --c4-text:      #f1f5f9;  /* All text inside diagrams                 */
+    --c4-edge:      #6b7280;  /* Relationship lines / arrows              */
   }
 
   html {
     scroll-behavior: smooth;
+  }
+
+  /* Ensure exported C4 SVGs are fluid inside DiagramViewer */
+  .c4-diagram svg {
+    width: 100%;
+    height: auto;
+    display: block;
   }
 }
 
