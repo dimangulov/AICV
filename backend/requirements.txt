@@ -6,7 +6,7 @@ httpx==0.28.1
 
 # LangChain ecosystem
 langchain==0.3.13
-langchain-core==0.3.28
+langchain-core==0.3.63
 langchain-community==0.3.13
 langchain-ollama==0.2.3       # local dev  (LLM_PROVIDER=ollama)
 langchain-openai==0.3.7       # cloud deploy (LLM_PROVIDER=azure_openai)
