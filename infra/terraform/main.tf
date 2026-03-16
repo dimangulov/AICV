@@ -284,5 +284,13 @@ resource "azurerm_container_app" "backend" {
     azurerm_role_assignment.acr_pull,
     azurerm_role_assignment.cognitive_user,
   ]
+
+  lifecycle {
+    # Image is managed by the deploy-backend CI job — prevent Terraform from
+    # reverting it to the placeholder on subsequent applies.
+    ignore_changes = [
+      template[0].container[0].image,
+    ]
+  }
 }
 
