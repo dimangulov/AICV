@@ -31,6 +31,13 @@ frontend/.next/
 frontend/out/
 frontend/node_modules/
 
+# TypeScript build cache
+frontend/tsconfig.tsbuildinfo
+
+# Generated files
+backend/*.pdf
+backend/damir_imangulov_cv.pdf
+
 # Docker
 *.log
 
