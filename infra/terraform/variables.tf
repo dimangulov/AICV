@@ -29,11 +29,7 @@ variable "openai_location" {
   }
 }
 
-variable "backend_image_tag" {
-  description = "Backend Docker image tag to deploy to Container Apps."
-  type        = string
-  default     = "latest"
-}
+
 
 variable "qdrant_cloud_url" {
   description = "Qdrant Cloud cluster HTTPS URL (e.g. https://xyz.azure.qdrant.io:6333)."

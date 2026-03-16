@@ -201,7 +201,8 @@ resource "azurerm_container_app" "backend" {
 
     container {
       name   = "backend"
-      image  = "${azurerm_container_registry.acr.login_server}/aicv-backend:${var.backend_image_tag}"
+      # Public placeholder — deploy-backend job updates this to the real ACR image after push
+      image  = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
       cpu    = 0.5
       memory = "1Gi"
 

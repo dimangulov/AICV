@@ -64,12 +64,14 @@ jobs:
         working-directory: infra/terraform
         env:
           # Sensitive variables injected directly — never stored in tfvars files
-          TF_VAR_qdrant_cloud_url:     ${{ secrets.QDRANT_CLOUD_URL }}
-          TF_VAR_qdrant_cloud_api_key: ${{ secrets.QDRANT_CLOUD_API_KEY }}
-          TF_VAR_live_avatar_api_key:  ${{ secrets.LIVEAVATAR_API_KEY }}
+          TF_VAR_qdrant_cloud_url:        ${{ secrets.QDRANT_CLOUD_URL }}
+          TF_VAR_qdrant_cloud_api_key:    ${{ secrets.QDRANT_CLOUD_API_KEY }}
+          TF_VAR_live_avatar_api_key:     ${{ secrets.LIVEAVATAR_API_KEY }}
           # Leave azure_openai_api_key empty → uses Managed Identity on Container Apps
-          TF_VAR_azure_openai_api_key: ""
-          TF_VAR_backend_image_tag:    ${{ github.event.inputs.image_tag || github.sha }}
+          TF_VAR_azure_openai_api_key:    ""
+          # Non-sensitive config — stored as a GitHub Actions variable (not secret)
+          TF_VAR_live_avatar_avatar_id:   ${{ vars.LIVEAVATAR_AVATAR_ID }}
+
 
       - name: Capture Terraform outputs
         id: tf_out
