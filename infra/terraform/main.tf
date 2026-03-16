@@ -176,10 +176,6 @@ resource "azurerm_container_app" "backend" {
     value = var.qdrant_cloud_api_key
   }
   secret {
-    name  = "aoai-api-key"
-    value = var.azure_openai_api_key
-  }
-  secret {
     name  = "liveavatar-api-key"
     value = var.live_avatar_api_key
   }
@@ -232,8 +228,8 @@ resource "azurerm_container_app" "backend" {
       }
       # Empty string → Python DefaultAzureCredential uses the Managed Identity
       env {
-        name        = "AZURE_OPENAI_API_KEY"
-        secret_name = "aoai-api-key"
+        name  = "AZURE_OPENAI_API_KEY"
+        value = ""
       }
 
       # ── Vector database ───────────────────────────────────────────────────────
