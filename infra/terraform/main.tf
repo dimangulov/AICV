@@ -211,6 +211,11 @@ resource "azurerm_container_app" "backend" {
         name  = "LLM_PROVIDER"
         value = "azure_openai"
       }
+      # Tells DefaultAzureCredential which user-assigned managed identity to use
+      env {
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.backend.client_id
+      }
       env {
         name  = "AZURE_OPENAI_ENDPOINT"
         value = azurerm_cognitive_account.openai.endpoint
