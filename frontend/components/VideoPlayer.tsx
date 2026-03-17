@@ -35,6 +35,17 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
   );
 
   const connect = useCallback(async () => {
+    // iOS Safari blocks audio autoplay unless triggered by a user gesture.
+    // Calling play() here (inside the click handler) unlocks the audio element
+    // so that subsequent programmatic play() calls on track subscribe succeed.
+    if (audioRef.current) {
+      audioRef.current.muted = true;
+      await audioRef.current.play().catch(() => {});
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current.muted = false;
+    }
+
     // Tear down any previous LiveKit room
     void roomRef.current?.disconnect();
     roomRef.current = null;
@@ -161,7 +172,8 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
   return (
     <div className="relative w-full h-full min-h-[400px] flex flex-col items-center justify-center">
       {/* Hidden audio element for avatar voice — separate from video to avoid mute restrictions */}
-      <audio ref={audioRef} autoPlay playsInline />
+      {/* autoPlay omitted — we call play() manually after the iOS unlock in connect() */}
+      <audio ref={audioRef} playsInline />
 
       {/* Video element — always rendered so the ref is stable */}
       <video
