@@ -274,10 +274,10 @@ resource "azurerm_container_app" "backend" {
         value = var.live_avatar_avatar_id
       }
 
-      # ── CORS: restrict to the Static Web App origin ───────────────────────────
+      # ── CORS: restrict to the custom domain origin ────────────────────────────
       env {
         name  = "ALLOWED_ORIGINS"
-        value = "https://${azurerm_static_web_app.frontend.default_host_name}"
+        value = "https://dimangulov.space,https://www.dimangulov.space"
       }
 
       # ── Azure Speech TTS ──────────────────────────────────────────────────────
