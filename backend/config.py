@@ -79,7 +79,7 @@ ALLOWED_ORIGINS: list[str] = [
 ]
 
 MAX_SESSIONS: int = int(os.getenv("MAX_SESSIONS", "50"))
-SESSION_IDLE_TTL: float = 300.0  # evict sessions idle > 5 min
+SESSION_IDLE_TTL: float = 120.0  # evict sessions idle > 2 min
 
 # Validates X-Session-ID header — must be UUID v4 format
 UUID_RE: re.Pattern[str] = re.compile(

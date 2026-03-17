@@ -148,9 +148,9 @@ async def pop_user_session(sid: str) -> UserSession | None:
 
 
 async def evict_idle_sessions() -> None:
-    """Background task: remove sessions idle > SESSION_IDLE_TTL every 5 minutes."""
+    """Background task: remove sessions idle > SESSION_IDLE_TTL every 2 minutes."""
     while True:
-        await asyncio.sleep(300)
+        await asyncio.sleep(60)
         now = time.monotonic()
         async with _user_sessions_lock:
             to_remove = [
