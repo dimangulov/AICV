@@ -8,10 +8,29 @@ import type { AskResponse, HistoryMessage, SessionResponse } from "@/types";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-/** Tab-scoped session ID — generated once per page load, stable across re-renders. */
+const SESSION_STORAGE_KEY = "aicv_session_id";
+
+/** Tab-scoped session ID — persisted in localStorage so refreshes reuse the same backend session. */
 export let sessionId = "";
-export function initSessionId(id: string) {
-  sessionId = id;
+
+export function initSessionId(): string {
+  if (typeof window === "undefined") return "";
+  const stored = localStorage.getItem(SESSION_STORAGE_KEY);
+  if (stored) {
+    sessionId = stored;
+  } else {
+    sessionId = crypto.randomUUID();
+    localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+  }
+  return sessionId;
+}
+
+export function resetSessionId(): string {
+  sessionId = crypto.randomUUID();
+  if (typeof window !== "undefined") {
+    localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+  }
+  return sessionId;
 }
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -111,6 +130,18 @@ export async function speakText(text: string): Promise<void> {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Session-ID": sessionId },
     body: JSON.stringify({ text }),
+  });
+  await handleResponse<{ status: string }>(res);
+}
+
+/**
+ * POST /interrupt
+ * Signals the backend to stop the avatar's current speech immediately.
+ */
+export async function interruptSpeech(): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/interrupt`, {
+    method: "POST",
+    headers: { "X-Session-ID": sessionId },
   });
   await handleResponse<{ status: string }>(res);
 }

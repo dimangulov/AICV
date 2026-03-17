@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import { Loader2, Play, VideoOff, AlertTriangle, Wifi, WifiOff } from "lucide-react";
-import { getSession } from "@/lib/api";
+import { getSession, resetSessionId } from "@/lib/api";
 
 type ConnectionStatus =
   | "idle"
@@ -16,13 +16,19 @@ interface VideoPlayerProps {
   onLog?: (message: string, level?: "info" | "success" | "error") => void;
   /** Called once the LiveKit room is live and the avatar is ready. */
   onConnected?: () => void;
+  /** Called once the avatar's audio element has a live source attached. Wire into useAvatarAudioGate. */
+  onAudioReady?: (el: HTMLAudioElement) => void;
 }
 
-export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
+export default function VideoPlayer({ onLog, onConnected, onAudioReady }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const roomRef = useRef<Room | null>(null);
   const canvasCleanupRef = useRef<(() => void) | null>(null);
+
+  // Ref keeps onAudioReady stable inside the connect callback without re-creating it.
+  const onAudioReadyRef = useRef(onAudioReady);
+  useEffect(() => { onAudioReadyRef.current = onAudioReady; }, [onAudioReady]);
 
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
@@ -84,6 +90,7 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
             .play()
             .catch((e: unknown) => log(`[Avatar] Audio autoplay blocked: ${e}`, "error"));
           log("[Avatar] Audio track attached", "info");
+          onAudioReadyRef.current?.(audioRef.current);
         }
       });
 
@@ -107,9 +114,47 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
       log("[Avatar] Connected to LiveKit room, waiting for video track...");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
-      setErrorMsg(msg);
-      setStatus("error");
-      log(`[Avatar] Connection failed: ${msg}`, "error");
+      log(`[Avatar] Connection failed: ${msg} — retrying with fresh session...`, "error");
+
+      // Stale session from a previous page load — reset and retry once
+      resetSessionId();
+      try {
+        const session = await getSession();
+        log(`[Avatar] Fresh session obtained: ${session.session_id.slice(0, 12)}…`, "success");
+        setStatus("connecting");
+
+        if (session.session_id === "mock-session-id") {
+          canvasCleanupRef.current = startMockStream(videoRef);
+          setStatus("connected");
+          return;
+        }
+
+        const room = new Room();
+        roomRef.current = room;
+
+        room.on(RoomEvent.TrackSubscribed, (track) => {
+          if (track.kind === Track.Kind.Video && videoRef.current) {
+            track.attach(videoRef.current);
+            videoRef.current.play().catch(() => {});
+            setStatus("connected");
+            log("[Avatar] Live stream connected!", "success");
+          }
+          if (track.kind === Track.Kind.Audio && audioRef.current) {
+            track.attach(audioRef.current);
+            audioRef.current.play().catch(() => {});
+            onAudioReadyRef.current?.(audioRef.current);
+          }
+        });
+        room.on(RoomEvent.Connected, () => { onConnected?.(); });
+        room.on(RoomEvent.Disconnected, () => { setStatus("idle"); });
+
+        await room.connect(session.livekit_url, session.livekit_client_token, { autoSubscribe: true });
+      } catch (retryErr) {
+        const retryMsg = retryErr instanceof Error ? retryErr.message : "Unknown error";
+        setErrorMsg(retryMsg);
+        setStatus("error");
+        log(`[Avatar] Retry failed: ${retryMsg}`, "error");
+      }
     }
   }, [log]);
 
