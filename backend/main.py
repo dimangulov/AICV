@@ -35,9 +35,12 @@ import httpx
 import miniaudio
 import websockets
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, status
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Qdrant as QdrantVectorStore
 from langchain_core.output_parsers import StrOutputParser
@@ -422,6 +425,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -441,7 +448,9 @@ app.add_middleware(
     response_model=AskResponse,
     summary="Ask a question about the candidate",
 )
+@limiter.limit("20/minute")
 async def ask(
+    request: Request,
     payload: AskRequest,
     background_tasks: BackgroundTasks,
     x_session_id: str = Header(default="anonymous"),
@@ -490,7 +499,9 @@ _SENTENCE_ENDINGS = re.compile(r'(?<=[.!?])\s+')
     "/ask/stream",
     summary="Stream a question answer token by token (SSE)",
 )
+@limiter.limit("20/minute")
 async def ask_stream(
+    request: Request,
     payload: AskRequest,
     x_session_id: str = Header(default="anonymous"),
 ) -> StreamingResponse:
