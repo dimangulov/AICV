@@ -143,17 +143,10 @@ jobs:
 
       - name: Update Container App image
         run: |
-          MANAGED_IDENTITY_CLIENT_ID=$(az identity show \
-            --name aicv-prod-backend-id \
-            --resource-group ${{ needs.terraform-infra.outputs.resource_group_name }} \
-            --query clientId -o tsv)
-
           az containerapp update \
-            --name        ${{ needs.terraform-infra.outputs.container_app_name }} \
+            --name           ${{ needs.terraform-infra.outputs.container_app_name }} \
             --resource-group ${{ needs.terraform-infra.outputs.resource_group_name }} \
-            --image       ${{ needs.terraform-infra.outputs.acr_login_server }}/aicv-backend:${{ needs.build-backend.outputs.image_tag }} \
-            --set-env-vars "ALLOWED_ORIGINS=${{ needs.terraform-infra.outputs.frontend_url }}" \
-                           "AZURE_CLIENT_ID=$MANAGED_IDENTITY_CLIENT_ID"
+            --image          ${{ needs.terraform-infra.outputs.acr_login_server }}/aicv-backend:${{ needs.build-backend.outputs.image_tag }}
 
   # ── Job 4: Deploy Next.js static export to Azure Static Web Apps ──────────
   deploy-frontend:
