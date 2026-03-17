@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import { Loader2, Play, VideoOff, AlertTriangle, Wifi, WifiOff } from "lucide-react";
-import { getSession, resetSessionId } from "@/lib/api";
+import { getSession, resetSessionId, closeSession } from "@/lib/api";
 
 type ConnectionStatus =
   | "idle"
@@ -164,9 +164,20 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      closeSession();
       void roomRef.current?.disconnect();
       canvasCleanupRef.current?.();
     };
+  }, []);
+
+  // iOS Safari doesn't fire beforeunload reliably — pagehide fires on refresh/close.
+  useEffect(() => {
+    const handlePageHide = () => {
+      closeSession();
+      roomRef.current?.disconnect();
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    return () => window.removeEventListener("pagehide", handlePageHide);
   }, []);
 
   return (
