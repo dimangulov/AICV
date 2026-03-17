@@ -1,4 +1,14 @@
-output "backend_url" {
+output "swa_apex_validation_token" {
+  description = "TXT record value to add to GoDaddy DNS for apex domain (dimangulov.space) validation."
+  value       = azurerm_static_web_app_custom_domain.apex.validation_token
+}
+
+output "swa_default_hostname" {
+  description = "Default SWA hostname — use as CNAME target for www.dimangulov.space."
+  value       = azurerm_static_web_app.frontend.default_host_name
+}
+
+
   description = "HTTPS URL of the FastAPI backend Container App."
   value       = var.enable_container_apps ? "https://${azurerm_container_app.backend[0].ingress[0].fqdn}" : "(container apps disabled)"
 }
