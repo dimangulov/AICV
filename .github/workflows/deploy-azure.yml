@@ -71,7 +71,7 @@ jobs:
           # Leave azure_openai_api_key empty → uses Managed Identity on Container Apps
           TF_VAR_azure_openai_api_key:    ""
           # Non-sensitive config — stored as a GitHub Actions variable (not secret)
-          TF_VAR_live_avatar_avatar_id:   ${{ vars.LIVEAVATAR_AVATAR_ID || 'dd73ea75-1218-4ef3-92ce-606d5f7fbc0a' }}
+          TF_VAR_live_avatar_avatar_id:   ${{ vars.LIVE_AVATAR_AVATAR_ID || 'dd73ea75-1218-4ef3-92ce-606d5f7fbc0a' }}
 
 
       - name: Capture Terraform outputs
