@@ -58,9 +58,13 @@ variable "live_avatar_api_key" {
 }
 
 variable "live_avatar_avatar_id" {
-  description = "LiveAvatar avatar ID."
+  description = "LiveAvatar avatar ID (UUID). Set via TF_VAR_live_avatar_avatar_id or LIVEAVATAR_AVATAR_ID GitHub Actions variable."
   type        = string
-  default     = "default"
+  default     = "dd73ea75-1218-4ef3-92ce-606d5f7fbc0a"
+  validation {
+    condition     = can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.live_avatar_avatar_id))
+    error_message = "live_avatar_avatar_id must be a valid UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)."
+  }
 }
 
 variable "enable_container_apps" {
