@@ -319,6 +319,7 @@ export default function ChatInterface({ onLog }: ChatInterfaceProps) {
 }
 
 const SUGGESTED_QUESTIONS = [
+  "AI CV project",
   "What cloud platforms do you specialise in?",
   "Tell me about your AI/ML projects",
   "Describe your backend stack",
