@@ -36,13 +36,13 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
 
   const connect = useCallback(async () => {
     // iOS Safari blocks audio autoplay unless triggered by a user gesture.
-    // Calling play() here (inside the click handler) unlocks the audio element
-    // so that subsequent programmatic play() calls on track subscribe succeed.
+    // Fire-and-forget: calling play() here (inside the click handler) is enough
+    // to unlock the audio element — we must NOT await it when there is no src,
+    // because the promise never settles on Chrome/Safari with a sourceless element.
     if (audioRef.current) {
       audioRef.current.muted = true;
-      await audioRef.current.play().catch(() => {});
+      audioRef.current.play().catch(() => {});
       audioRef.current.pause();
-      audioRef.current.currentTime = 0;
       audioRef.current.muted = false;
     }
 
