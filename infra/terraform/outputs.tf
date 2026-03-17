@@ -1,6 +1,6 @@
 output "backend_url" {
   description = "HTTPS URL of the FastAPI backend Container App."
-  value       = var.enable_container_apps ? "https://${azurerm_container_app.backend[0].latest_revision_fqdn}" : "(container apps disabled)"
+  value       = var.enable_container_apps ? "https://${azurerm_container_app.backend[0].ingress[0].fqdn}" : "(container apps disabled)"
 }
 
 output "frontend_url" {
