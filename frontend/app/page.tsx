@@ -68,8 +68,11 @@ export default function Home() {
             speakText(AVATAR_INTRO)
               .catch(() => {})
               .finally(() => {
-                // Auto-start continuous listening after intro finishes
-                chatRef.current?.startContinuous();
+                // speakText resolves when the backend queues the speech, not when
+                // audio playback ends.  Delay starting the microphone until the
+                // avatar has had time to finish speaking (~15 chars/sec ≈ 150 wpm).
+                const delay = Math.max(2000, (AVATAR_INTRO.length / 15) * 1000);
+                setTimeout(() => chatRef.current?.startContinuous(), delay);
               });
           }}
         />
@@ -123,6 +126,15 @@ export default function Home() {
                     AI digital twin about .NET &amp; Python backends, React frontends,
                     cloud-native architecture, or any technical challenge.
                   </p>
+                  <a
+                    href="https://github.com/dimangulov/AICV"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 mt-3 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 hover:border-gray-500 hover:bg-gray-700 text-gray-300 hover:text-white text-xs font-medium transition-all"
+                  >
+                    <Github className="w-4 h-4" />
+                    dimangulov/AICV
+                  </a>
                   <div className="flex flex-wrap items-center gap-2 mt-3">
                     <a
                       href="mailto:dimangulov@gmail.com"
