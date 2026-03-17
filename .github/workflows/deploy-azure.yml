@@ -35,6 +35,7 @@ jobs:
       container_app_name:  ${{ steps.tf_out.outputs.container_app_name }}
       resource_group_name: ${{ steps.tf_out.outputs.resource_group_name }}
       backend_url:         ${{ steps.tf_out.outputs.backend_url }}
+      frontend_url:        ${{ steps.tf_out.outputs.frontend_url }}
 
     steps:
       - uses: actions/checkout@v4
@@ -81,6 +82,7 @@ jobs:
           echo "container_app_name=$(terraform output -raw container_app_name)" >> "$GITHUB_OUTPUT"
           echo "resource_group_name=$(terraform output -raw resource_group_name)" >> "$GITHUB_OUTPUT"
           echo "backend_url=$(terraform output -raw backend_url)"             >> "$GITHUB_OUTPUT"
+          echo "frontend_url=$(terraform output -raw frontend_url)"           >> "$GITHUB_OUTPUT"
         working-directory: infra/terraform
 
   # ── Job 2: Build & push backend Docker image to ACR ──────────────────────
@@ -140,12 +142,12 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Update Container App image
-        uses: azure/container-apps-deploy-action@v2
-        with:
-          containerAppName: ${{ needs.terraform-infra.outputs.container_app_name }}
-          resourceGroup:    ${{ needs.terraform-infra.outputs.resource_group_name }}
-          imageToDeploy: |
-            ${{ needs.terraform-infra.outputs.acr_login_server }}/aicv-backend:${{ needs.build-backend.outputs.image_tag }}
+        run: |
+          az containerapp update \
+            --name        ${{ needs.terraform-infra.outputs.container_app_name }} \
+            --resource-group ${{ needs.terraform-infra.outputs.resource_group_name }} \
+            --image       ${{ needs.terraform-infra.outputs.acr_login_server }}/aicv-backend:${{ needs.build-backend.outputs.image_tag }} \
+            --set-env-vars "ALLOWED_ORIGINS=${{ needs.terraform-infra.outputs.frontend_url }}"
 
   # ── Job 4: Deploy Next.js static export to Azure Static Web Apps ──────────
   deploy-frontend:
