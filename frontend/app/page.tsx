@@ -2,14 +2,13 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import VideoPlayer from "@/components/VideoPlayer";
-import ChatInterface, { type ChatInterfaceHandle } from "@/components/ChatInterface";
+import ChatInterface from "@/components/ChatInterface";
 import DevConsole from "@/components/DevConsole";
 import ArchitectureSection from "@/components/ArchitectureSection";
 import DesignSection from "@/components/DesignSection";
 import C4DiagramsSection from "@/components/C4DiagramsSection";
 import { Github, Mail, Linkedin, MapPin } from "lucide-react";
-import { speakText, initSessionId } from "@/lib/api";
-import { useAvatarAudioGate } from "@/hooks/useAvatarAudioGate";
+import { speakText, initSessionId, ping } from "@/lib/api";
 import type { LogEntry } from "@/types";
 
 const INTRO_PLAYED_KEY = "aicv_intro_played";
@@ -34,45 +33,10 @@ export default function Home() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const introSpoken = useRef(false);
-  const chatRef = useRef<ChatInterfaceHandle>(null);
 
-  // Restore or create session ID from localStorage
   useEffect(() => {
     initSessionId();
-  }, []);  const [avatarAudioEl, setAvatarAudioEl] = useState<HTMLAudioElement | null>(null);
-  const isAvatarSpeaking = useAvatarAudioGate(avatarAudioEl);
-
-  // Tracks the intro mic-start lifecycle:
-  //   "waiting"  — onConnected hasn't fired yet
-  //   "pending"  — intro speech queued; waiting for gate to go active
-  //   "speaking" — gate confirmed audio is playing
-  //   "done"     — gate went silent; mic started (or fallback fired)
-  const introPhaseRef = useRef<"waiting" | "pending" | "speaking" | "done">("waiting");
-  const introFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Start the mic once the intro finishes (gate: speaking → silent).
-  // Also guards against mock mode where the gate never fires.
-  useEffect(() => {
-    const phase = introPhaseRef.current;
-    if (phase === "done" || phase === "waiting") return;
-
-    if (phase === "pending" && isAvatarSpeaking) {
-      // Gate confirmed audio is live — cancel the fallback timer.
-      introPhaseRef.current = "speaking";
-      if (introFallbackRef.current) {
-        clearTimeout(introFallbackRef.current);
-        introFallbackRef.current = null;
-      }
-    } else if (phase === "speaking" && !isAvatarSpeaking) {
-      // Audio finished — safe to open the mic.
-      introPhaseRef.current = "done";
-      chatRef.current?.startContinuous();
-    }
-  }, [isAvatarSpeaking]);
-
-  // Restore or create session ID from localStorage (persists across refreshes)
-  useEffect(() => {
-    initSessionId();
+    ping();
   }, []);
 
   const addLog = useCallback(
@@ -97,30 +61,16 @@ export default function Home() {
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(59,130,246,0.08)_0%,transparent_70%)] pointer-events-none" />
         <VideoPlayer
           onLog={(msg, lvl) => addLog(msg, lvl ?? "info")}
-          onAudioReady={setAvatarAudioEl}
           onConnected={() => {
             if (introSpoken.current) return;
             introSpoken.current = true;
-
-            // Only play intro the very first time the visitor opens the site.
             const alreadyPlayed = localStorage.getItem(INTRO_PLAYED_KEY) === "1";
             if (!alreadyPlayed) {
               localStorage.setItem(INTRO_PLAYED_KEY, "1");
               addLog("[Avatar] Playing intro...", "info");
               speakText(AVATAR_INTRO).catch(() => {});
-              introPhaseRef.current = "pending";
-              const fallbackMs = Math.max(3000, (AVATAR_INTRO.length / 15) * 1000);
-              introFallbackRef.current = setTimeout(() => {
-                if (introPhaseRef.current !== "done") {
-                  introPhaseRef.current = "done";
-                  chatRef.current?.startContinuous();
-                }
-              }, fallbackMs);
             } else {
-              // Returning visitor — skip intro, start mic immediately
-              addLog("[Avatar] Reconnected (returning visitor — skipping intro)", "info");
-              introPhaseRef.current = "done";
-              chatRef.current?.startContinuous();
+              addLog("[Avatar] Reconnected", "info");
             }
           }}
         />
@@ -228,7 +178,7 @@ export default function Home() {
                 ))}
               </div>
 
-              <ChatInterface ref={chatRef} onLog={addLog} isAvatarSpeaking={isAvatarSpeaking} />
+              <ChatInterface onLog={addLog} />
               <DevConsole logs={logs} />
             </div>
           )}

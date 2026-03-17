@@ -51,6 +51,8 @@ interface UseSpeechRecognitionOptions {
   onResult: (transcript: string) => void;
   /** Called when the browser reports a recognition error. */
   onError?: (error: string) => void;
+  /** Called when the user starts speaking (first audio detected). Use to interrupt avatar TTS. */
+  onSpeechStart?: () => void;
   /** BCP-47 language tag. Defaults to "en-US". */
   lang?: string;
 }
@@ -81,6 +83,7 @@ export interface UseSpeechRecognitionReturn {
 export function useSpeechRecognition({
   onResult,
   onError,
+  onSpeechStart,
   lang = "en-US",
 }: UseSpeechRecognitionOptions): UseSpeechRecognitionReturn {
   const [isListening, setIsListening] = useState(false);
@@ -93,10 +96,12 @@ export function useSpeechRecognition({
   const shouldRestartRef = useRef(false); // controls continuous auto-restart
   const onResultRef = useRef(onResult);
   const onErrorRef = useRef(onError);
+  const onSpeechStartRef = useRef(onSpeechStart);
 
   // Keep refs up to date so callbacks inside recognition handlers see latest values
   useEffect(() => { onResultRef.current = onResult; }, [onResult]);
   useEffect(() => { onErrorRef.current = onError; }, [onError]);
+  useEffect(() => { onSpeechStartRef.current = onSpeechStart; }, [onSpeechStart]);
 
   useEffect(() => {
     setIsSupported(
@@ -122,6 +127,7 @@ export function useSpeechRecognition({
         setIsListening(true);
         setTranscript("");
         setInterimTranscript("");
+        onSpeechStartRef.current?.();
       };
 
       r.onresult = (event: SpeechRecognitionEvent) => {
@@ -134,6 +140,13 @@ export function useSpeechRecognition({
             if (finalText) {
               setTranscript(finalText);
               setInterimTranscript("");
+              // In push-to-talk (non-continuous) mode, stop immediately on the
+              // final result so the button snaps back to idle without waiting
+              // for the natural onend event.
+              if (!continuous) {
+                recognitionRef.current?.stop();
+                setIsListening(false);
+              }
               onResultRef.current(finalText);
             }
           } else {

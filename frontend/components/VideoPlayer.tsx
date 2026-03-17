@@ -16,19 +16,13 @@ interface VideoPlayerProps {
   onLog?: (message: string, level?: "info" | "success" | "error") => void;
   /** Called once the LiveKit room is live and the avatar is ready. */
   onConnected?: () => void;
-  /** Called once the avatar's audio element has a live source attached. Wire into useAvatarAudioGate. */
-  onAudioReady?: (el: HTMLAudioElement) => void;
 }
 
-export default function VideoPlayer({ onLog, onConnected, onAudioReady }: VideoPlayerProps) {
+export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const roomRef = useRef<Room | null>(null);
   const canvasCleanupRef = useRef<(() => void) | null>(null);
-
-  // Ref keeps onAudioReady stable inside the connect callback without re-creating it.
-  const onAudioReadyRef = useRef(onAudioReady);
-  useEffect(() => { onAudioReadyRef.current = onAudioReady; }, [onAudioReady]);
 
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
@@ -90,7 +84,6 @@ export default function VideoPlayer({ onLog, onConnected, onAudioReady }: VideoP
             .play()
             .catch((e: unknown) => log(`[Avatar] Audio autoplay blocked: ${e}`, "error"));
           log("[Avatar] Audio track attached", "info");
-          onAudioReadyRef.current?.(audioRef.current);
         }
       });
 
@@ -142,7 +135,6 @@ export default function VideoPlayer({ onLog, onConnected, onAudioReady }: VideoP
           if (track.kind === Track.Kind.Audio && audioRef.current) {
             track.attach(audioRef.current);
             audioRef.current.play().catch(() => {});
-            onAudioReadyRef.current?.(audioRef.current);
           }
         });
         room.on(RoomEvent.Connected, () => { onConnected?.(); });

@@ -16,6 +16,7 @@ import base64
 import json
 import logging
 import os
+import random
 import re
 import time
 import uuid
@@ -98,7 +99,8 @@ LIVEAVATAR_API_KEY: str = os.getenv("LIVEAVATAR_API_KEY", "")
 LIVEAVATAR_AVATAR_ID: str = os.getenv("LIVEAVATAR_AVATAR_ID", "default")
 LIVEAVATAR_SESSION_MODE: str = os.getenv("LIVEAVATAR_SESSION_MODE", "LITE")
 LIVEAVATAR_IS_SANDBOX: bool = os.getenv("LIVEAVATAR_IS_SANDBOX", "false").lower() == "true"
-LIVEAVATAR_VOICE: str = os.getenv("LIVEAVATAR_VOICE", "en-US-GuyNeural")
+LIVEAVATAR_VOICE: str = os.getenv("LIVEAVATAR_VOICE", "en-US-AndrewMultilingualNeural")
+ENABLE_FILLERS: bool = os.getenv("ENABLE_FILLERS", "false").lower() == "true"
 
 # ── Azure Cognitive Services Speech (TTS for LiveAvatar) ──────────────────────
 # Official REST API — same voices as Edge TTS, no unofficial WebSocket hacks.
@@ -396,19 +398,60 @@ Answer:"""
 
 _rag_chain: RunnableSerializable | None = None
 
+# Persistent HTTP client — reused across all TTS requests to avoid per-call
+# TCP + TLS connection setup (~500-1200ms overhead with a new client each time).
+_http_client: httpx.AsyncClient | None = None
+
+# Short filler phrases spoken immediately while the LLM generates the real answer.
+# Pre-synthesised at startup so there is zero TTS latency at question time.
+_FILLER_PHRASES: list[str] = [
+    "Sure, let me think about that.",
+    "Good question — give me just a moment.",
+    "Interesting — let me pull that up for you.",
+    "Absolutely, one second.",
+    "Let me check that for you.",
+    "Great question, I'll look into that right now.",
+    "Of course — just a moment while I think through that.",
+    "Sure thing, I'm on it.",
+]
+_filler_cache: dict[str, bytes] = {}  # phrase → PCM bytes
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _rag_chain
+    global _rag_chain, _http_client
     logger.info("=== Digital Twin CV API — startup ===")
+
+    # Persistent HTTP client with connection pooling for TTS and any future HTTP calls.
+    _http_client = httpx.AsyncClient(
+        timeout=30.0,
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+    )
+
     try:
         _rag_chain = build_rag_chain()
     except Exception as exc:
-        # Log the error but allow startup to complete — /health will report degraded
         logger.error("RAG chain initialisation failed: %s", exc, exc_info=True)
+
+    # Pre-synthesise filler phrases so they play with zero TTS latency.
+    if ENABLE_FILLERS and (AZURE_SPEECH_KEY or _GTTS_AVAILABLE):
+        async def _warm_fillers() -> None:
+            for phrase in _FILLER_PHRASES:
+                try:
+                    _filler_cache[phrase] = await _synthesize_pcm(phrase)
+                    logger.debug("[filler] Cached: %r", phrase[:40])
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[filler] Failed to cache %r: %s", phrase[:40], exc)
+            logger.info("[filler] Pre-synthesised %d/%d phrases", len(_filler_cache), len(_FILLER_PHRASES))
+        asyncio.create_task(_warm_fillers())
+    else:
+        logger.info("[filler] No TTS backend — skipping filler pre-synthesis")
+
     eviction_task = asyncio.create_task(_evict_idle_sessions())
     yield
     eviction_task.cancel()
+    if _http_client:
+        await _http_client.aclose()
     logger.info("=== Digital Twin CV API — shutdown ===")
 
 
@@ -526,6 +569,15 @@ async def ask_stream(
         full_answer: list[str] = []
         sentence_buf: list[str] = []
 
+        # Fire a filler phrase immediately so the avatar is already speaking
+        # while the LLM generates the real answer. Use cached PCM when available
+        # to eliminate the TTS round-trip for the filler itself.
+        if ENABLE_FILLERS and LIVEAVATAR_API_KEY and _filler_cache:
+            filler_phrase = random.choice(list(_filler_cache))
+            filler_pcm = _filler_cache[filler_phrase]
+            asyncio.create_task(_speak_on_avatar(filler_phrase, sid, pcm_override=filler_pcm))
+            logger.debug("[filler] Queued: %r", filler_phrase)
+
         try:
             loop = asyncio.get_event_loop()
             # astream is the async streaming variant of invoke
@@ -581,29 +633,47 @@ def _mp3_to_pcm(mp3_bytes: bytes) -> bytes:
     return bytes(decoded.samples)
 
 
-async def _synthesize_pcm_azure(text: str) -> bytes:
+async def _stream_tts_azure(text: str):
     """
-    Azure Cognitive Services Speech TTS → MP3 → PCM.
-    Official REST API: same voice catalogue as Edge TTS, no unofficial WS.
+    Stream raw PCM (16-bit signed, mono, 24 kHz) from Azure Cognitive Services
+    Speech TTS.  Yields byte chunks as they arrive from the HTTP response so
+    callers can start forwarding audio before the full synthesis completes.
     """
     ssml = (
         f"<speak version='1.0' xml:lang='en-US'>"
         f"<voice name='{LIVEAVATAR_VOICE}'>{text}</voice>"
         f"</speak>"
     )
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1",
-            headers={
-                "Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY,
-                "Content-Type": "application/ssml+xml",
-                "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3",
-                "User-Agent": "aicv-backend",
-            },
-            content=ssml.encode(),
-        )
-        response.raise_for_status()
-    return _mp3_to_pcm(response.content)
+    url = f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
+    headers = {
+        "Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY,
+        "Content-Type": "application/ssml+xml",
+        "X-Microsoft-OutputFormat": "raw-24khz-16bit-mono-pcm",
+        "User-Agent": "aicv-backend",
+    }
+    client = _http_client
+    if client is not None:
+        async with client.stream("POST", url, headers=headers, content=ssml.encode()) as resp:
+            resp.raise_for_status()
+            async for chunk in resp.aiter_bytes(48_000):
+                yield chunk
+    else:
+        async with httpx.AsyncClient(timeout=30.0) as tmp:
+            async with tmp.stream("POST", url, headers=headers, content=ssml.encode()) as resp:
+                resp.raise_for_status()
+                async for chunk in resp.aiter_bytes(48_000):
+                    yield chunk
+
+
+async def _synthesize_pcm_azure(text: str) -> bytes:
+    """
+    Azure Cognitive Services Speech TTS → raw PCM (accumulates full stream).
+    Used for filler pre-synthesis cache.  Live speech uses _stream_tts_azure.
+    """
+    chunks: list[bytes] = []
+    async for chunk in _stream_tts_azure(text):
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 async def _synthesize_pcm_gtts(text: str) -> bytes:
@@ -642,11 +712,22 @@ async def _synthesize_pcm(text: str) -> bytes:
     )
 
 
-async def _speak_on_avatar(text: str, user_session_id: str = "anonymous") -> None:
+async def _speak_on_avatar(
+    text: str,
+    user_session_id: str = "anonymous",
+    *,
+    pcm_override: bytes | None = None,
+) -> None:
     """
     Synthesize text via TTS and stream PCM audio to the user's LiveAvatar
-    WebSocket. Each user_session_id has its own per-session WS connection so
+    WebSocket. Pass pcm_override to skip synthesis (e.g. pre-cached filler).
+    Each user_session_id has its own per-session WS connection so
     concurrent users never interleave audio.
+
+    When Azure TTS is configured, synthesis is streamed chunk-by-chunk: a
+    background producer task fills an asyncio.Queue concurrently with
+    LiveAvatar session acquisition so the avatar starts speaking as soon as
+    the first PCM bytes arrive (no full-buffer wait).
     """
     if not LIVEAVATAR_API_KEY:
         logger.debug("[speak] No LIVEAVATAR_API_KEY — skipping avatar speech")
@@ -655,16 +736,51 @@ async def _speak_on_avatar(text: str, user_session_id: str = "anonymous") -> Non
     entry = await _get_or_create_user_session(user_session_id)
     entry.last_active = time.monotonic()
 
-    # Run TTS synthesis and session acquisition concurrently — they are independent.
-    try:
-        pcm_bytes, liveavatar_session = await asyncio.gather(
-            _synthesize_pcm(text),
-            _get_or_create_liveavatar_session(entry),
-        )
-    except Exception as exc:
-        logger.error("[speak] Parallel TTS/session setup failed: %s", exc)
-        return
+    event_id = str(uuid.uuid4())
+    tts_task: asyncio.Task | None = None
+    tts_queue: asyncio.Queue[bytes | None] | None = None
+    pcm_bytes: bytes = b""
 
+    # --- Phase 1: start TTS + session acquisition concurrently ---------------
+    if pcm_override is not None:
+        # Pre-cached PCM — no synthesis needed, just ensure session is ready.
+        try:
+            liveavatar_session = await _get_or_create_liveavatar_session(entry)
+        except Exception as exc:
+            logger.error("[speak] Session setup failed: %s", exc)
+            return
+    elif AZURE_SPEECH_KEY:
+        # Stream Azure TTS into a queue while session setup runs in parallel.
+        tts_queue = asyncio.Queue(maxsize=8)
+
+        async def _tts_producer() -> None:
+            try:
+                async for chunk in _stream_tts_azure(text):
+                    await tts_queue.put(chunk)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[speak] TTS stream error: %s", exc)
+            finally:
+                await tts_queue.put(None)  # sentinel — end of stream
+
+        tts_task = asyncio.create_task(_tts_producer())
+        try:
+            liveavatar_session = await _get_or_create_liveavatar_session(entry)
+        except Exception as exc:
+            logger.error("[speak] Session setup failed: %s", exc)
+            tts_task.cancel()
+            return
+    else:
+        # gTTS fallback — blocking synthesis; parallelise with session setup.
+        try:
+            pcm_bytes, liveavatar_session = await asyncio.gather(
+                _synthesize_pcm_gtts(text),
+                _get_or_create_liveavatar_session(entry),
+            )
+        except Exception as exc:
+            logger.error("[speak] Parallel TTS/session setup failed: %s", exc)
+            return
+
+    # --- Phase 2: ensure WebSocket is open ------------------------------------
     ws = entry.speak_ws
     if ws is None:
         logger.warning("[speak] WebSocket not yet ready — waiting up to 3 s")
@@ -675,25 +791,59 @@ async def _speak_on_avatar(text: str, user_session_id: str = "anonymous") -> Non
                 break
         if ws is None:
             logger.error("[speak] WebSocket unavailable after wait — dropping speak")
+            if tts_task is not None:
+                tts_task.cancel()
             return
 
-    CHUNK_SIZE = 48_000
-    event_id = str(uuid.uuid4())
-
-    # Per-session lock: serialise chunks within one user's session only
+    # --- Phase 3: serialised WS send (per-session lock) ----------------------
     async with entry.speak_lock:
         try:
-            for i in range(0, len(pcm_bytes), CHUNK_SIZE):
-                chunk = pcm_bytes[i : i + CHUNK_SIZE]
+            entry.interrupted = False  # clear any previous interrupt
+
+            if pcm_override is not None:
+                # Send pre-cached PCM in fixed-size chunks
+                for i in range(0, len(pcm_override), 48_000):
+                    if entry.interrupted:
+                        logger.info("[speak] Interrupted — skipping remaining chunks")
+                        return
+                    await ws.send(json.dumps({
+                        "type": "agent.speak",
+                        "event_id": event_id,
+                        "audio": base64.b64encode(pcm_override[i : i + 48_000]).decode(),
+                    }))
+            elif tts_queue is not None:
+                # Drain the Azure TTS stream queue as chunks arrive
+                while True:
+                    chunk = await tts_queue.get()
+                    if chunk is None:  # sentinel — stream finished
+                        break
+                    if entry.interrupted:
+                        logger.info("[speak] Interrupted — stopping TTS stream")
+                        if tts_task is not None:
+                            tts_task.cancel()
+                        return
+                    await ws.send(json.dumps({
+                        "type": "agent.speak",
+                        "event_id": event_id,
+                        "audio": base64.b64encode(chunk).decode(),
+                    }))
+            else:
+                # gTTS fallback — send collected PCM in fixed-size chunks
+                for i in range(0, len(pcm_bytes), 48_000):
+                    if entry.interrupted:
+                        logger.info("[speak] Interrupted — skipping remaining chunks")
+                        return
+                    await ws.send(json.dumps({
+                        "type": "agent.speak",
+                        "event_id": event_id,
+                        "audio": base64.b64encode(pcm_bytes[i : i + 48_000]).decode(),
+                    }))
+
+            if not entry.interrupted:
                 await ws.send(json.dumps({
-                    "type": "agent.speak",
+                    "type": "agent.speak_end",
                     "event_id": event_id,
-                    "audio": base64.b64encode(chunk).decode(),
                 }))
-            await ws.send(json.dumps({
-                "type": "agent.speak_end",
-                "event_id": event_id,
-            }))
             logger.info(
                 "[speak] Done — user=%s liveav=%s",
                 user_session_id, liveavatar_session["session_id"],
@@ -724,6 +874,38 @@ async def speak(
     return {"status": "queued"}
 
 
+@app.post("/interrupt", summary="Stop the avatar mid-speech (user started talking)")
+async def interrupt(
+    x_session_id: str = Header(default="anonymous"),
+) -> dict[str, str]:
+    """
+    Sends an agent.interrupt event over the session's WebSocket so LiveAvatar
+    stops audio playback immediately, then sets the interrupted flag so any
+    in-progress _speak_on_avatar task skips remaining chunks.
+    """
+    sid = x_session_id if _UUID_RE.match(x_session_id) else "anonymous"
+    async with _user_sessions_lock:
+        entry = _user_sessions.get(sid)
+    if entry is None:
+        return {"status": "no-session"}
+
+    entry.interrupted = True
+    ws = entry.speak_ws
+    if ws is not None:
+        try:
+            await ws.send(json.dumps({
+                "type": "agent.interrupt",
+                "event_id": str(uuid.uuid4()),
+            }))
+            logger.info("[interrupt] agent.interrupt sent for user %s", sid)
+        except Exception as exc:
+            logger.warning("[interrupt] Failed to send agent.interrupt: %s", exc)
+            entry.invalidate(f"interrupt WS error: {exc}")
+    else:
+        logger.debug("[interrupt] No active WebSocket for user %s — flag set only", sid)
+    return {"status": "interrupted"}
+
+
 # ---------------------------------------------------------------------------
 # Per-user session store
 # Each browser tab gets its own UserSession keyed by X-Session-ID (UUID).
@@ -740,6 +922,8 @@ class UserSession:
     speak_ws: Any | None = None                 # persistent websockets connection
     speak_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_active: float = field(default_factory=time.monotonic)
+    # Set by /interrupt to abort any in-progress avatar speech immediately.
+    interrupted: bool = False
 
     def is_valid(self) -> bool:
         return self.liveavatar_data is not None and time.monotonic() < self.session_expires
@@ -980,6 +1164,12 @@ async def get_session(x_session_id: str = Header(default="anonymous")) -> dict[s
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Could not reach the LiveAvatar API ({type(exc).__name__}). Check network connectivity.",
         ) from exc
+
+
+@app.get("/ping", summary="Lightweight liveness probe / warmup endpoint")
+async def ping() -> dict[str, str]:
+    """Returns immediately — used by the frontend to wake a cold-started container."""
+    return {"status": "ok"}
 
 
 @app.get(

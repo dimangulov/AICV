@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   Mic,
   MicOff,
@@ -11,21 +11,16 @@ import {
   Radio,
 } from "lucide-react";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
-import { askQuestionStream } from "@/lib/api";
+import { askQuestionStream, interruptSpeech } from "@/lib/api";
 import type { LogEntry, ConversationMessage, HistoryMessage } from "@/types";
 
 interface ChatInterfaceProps {
   onLog: (message: string, level?: LogEntry["level"], step?: number) => void;
 }
 
-export interface ChatInterfaceHandle {
-  startContinuous: () => void;
-}
-
 let _msgId = 0;
 
-const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
-  ({ onLog }, ref) => {
+export default function ChatInterface({ onLog }: ChatInterfaceProps) {
     const [messages, setMessages] = useState<ConversationMessage[]>([]);
     const [streamingText, setStreamingText] = useState("");   // assistant bubble being built
     const [textInput, setTextInput] = useState("");
@@ -35,20 +30,18 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
     const isSubmittingRef = useRef(false);
     // Mirror of messages for synchronous reads outside state updaters
     const messagesRef = useRef<ConversationMessage[]>([]);
+
     // Keep a stable ref to the latest handleQuestion to break the stale closure in onResult
     const handleQuestionRef = useRef<(q: string) => void>(() => {});
 
-    // Expose startContinuous to parent (page.tsx auto-starts after intro)
     const {
       isListening,
-      isContinuous,
       interimTranscript,
       isSupported,
       startListening,
       stopListening,
-      startContinuous,
-      stopContinuous,
     } = useSpeechRecognition({
+
       onResult: useCallback(
         (text: string) => {
           onLog(`Listening — captured: "${text}"`, "success", 1);
@@ -56,10 +49,11 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
         },
         [onLog],
       ),
+      onSpeechStart: useCallback(() => {
+        interruptSpeech().catch(() => {});
+      }, []),
       onError: (err) => onLog(`Speech recognition error: ${err}`, "error"),
     });
-
-    useImperativeHandle(ref, () => ({ startContinuous }), [startContinuous]);
 
     // Auto-scroll on new messages / streaming update
     useEffect(() => {
@@ -81,6 +75,9 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
         const trimmed = question.trim();
         if (!trimmed || isSubmittingRef.current) return;
         isSubmittingRef.current = true;
+
+        // Interrupt avatar immediately whenever a question is submitted.
+        interruptSpeech().catch(() => {});
 
         setIsLoading(true);
         setStreamingText("");
@@ -249,47 +246,36 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
         {/* ── Input bar ───────────────────────────────────────────────────── */}
         <div className="pt-2 border-t border-gray-800 flex items-center gap-2">
 
-          {/* Mic toggle — continuous mode */}
-          {isSupported ? (
+          {/* Mic toggle — press to talk */}
+          {isSupported && (
             <button
-              onClick={isContinuous ? stopContinuous : startContinuous}
-              aria-label={isContinuous ? "Stop continuous listening" : "Start continuous listening"}
-              title={isContinuous ? "Stop listening" : "Start continuous listening"}
+              onClick={() => {
+                if (isListening) {
+                  stopListening();
+                } else {
+                  interruptSpeech().catch(() => {});
+                  startListening();
+                }
+              }}
+              disabled={isLoading}
+              aria-label={isListening ? "Stop recording" : "Press to speak"}
+              title={isListening ? "Stop recording" : isLoading ? "Processing…" : "Press to speak"}
               className={`relative flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center
                 transition-all duration-200
-                ${isContinuous
+                ${isListening
                   ? "bg-red-500/20 border border-red-500/60 text-red-400"
-                  : isListening
-                    ? "bg-blue-500/20 border border-blue-500/60 text-blue-400"
+                  : isLoading
+                    ? "bg-gray-800 border border-gray-700 text-gray-600 opacity-50 cursor-not-allowed"
                     : "bg-gray-800 border border-gray-700 text-gray-400 hover:border-gray-500"
                 }`}
             >
-              {isContinuous || isListening
+              {isListening
                 ? <Mic className="w-4 h-4" />
                 : <MicOff className="w-4 h-4" />
               }
-              {/* Pulsing ring when listening */}
-              {(isContinuous || isListening) && (
+              {isListening && (
                 <span className="absolute inset-0 rounded-full border border-red-400/50 animate-ping" />
               )}
-            </button>
-          ) : (
-            /* Push-to-talk fallback when continuous not wanted */
-            <button
-              onMouseDown={startListening}
-              onMouseUp={stopListening}
-              onTouchStart={(e) => { e.preventDefault(); startListening(); }}
-              onTouchEnd={(e) => { e.preventDefault(); stopListening(); }}
-              aria-label={isListening ? "Release to send" : "Hold to speak"}
-              className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-full text-xs
-                font-medium select-none touch-none transition-all
-                ${isListening
-                  ? "bg-red-500 text-white scale-105"
-                  : "bg-gray-800 border border-gray-700 text-gray-400"
-                }`}
-            >
-              {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-              {isListening ? "Release" : "Hold"}
             </button>
           )}
 
@@ -299,7 +285,8 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
               type="text"
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
-              placeholder={isContinuous ? "Listening… or type here" : "Ask Damir anything…"}
+              onFocus={() => interruptSpeech().catch(() => {})}
+              placeholder="Ask Damir anything…"
               disabled={isLoading}
               aria-label="Type your question"
               className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2
@@ -324,18 +311,12 @@ const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
         </div>
 
         {/* Status line */}
-        {(isContinuous || isListening) && !interimTranscript && (
-          <p className="text-xs text-gray-500 text-center pt-1 animate-pulse">
-            {isListening ? "Listening…" : "Ready — speak anytime"}
-          </p>
+        {isListening && !interimTranscript && (
+          <p className="text-xs text-gray-500 text-center pt-1 animate-pulse">Listening…</p>
         )}
       </div>
     );
-  },
-);
-
-ChatInterface.displayName = "ChatInterface";
-export default ChatInterface;
+}
 
 const SUGGESTED_QUESTIONS = [
   "What cloud platforms do you specialise in?",

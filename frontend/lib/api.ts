@@ -147,6 +147,14 @@ export async function interruptSpeech(): Promise<void> {
 }
 
 /**
+ * GET /ping
+ * Lightweight warmup call — wakes a cold-started container with no side-effects.
+ */
+export async function ping(): Promise<void> {
+  await fetch(`${API_BASE_URL}/ping`).catch(() => {});
+}
+
+/**
  * GET /health
  * Returns the backend health status object.
  */
