@@ -477,7 +477,7 @@ app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type", "X-Session-ID"],
     allow_credentials=False,
 )
@@ -924,21 +924,69 @@ class UserSession:
     last_active: float = field(default_factory=time.monotonic)
     # Set by /interrupt to abort any in-progress avatar speech immediately.
     interrupted: bool = False
+    # Stored so we can call /v1/sessions/stop on the LiveAvatar API when cleaning up.
+    liveavatar_session_id: str | None = None
+    liveavatar_session_token: str | None = None
 
     def is_valid(self) -> bool:
         return self.liveavatar_data is not None and time.monotonic() < self.session_expires
 
-    def invalidate(self, reason: str) -> None:
+    def invalidate(self, reason: str, *, stop_remote: bool = True) -> None:
+        """Clear cached session state and optionally fire a remote stop."""
         if self.liveavatar_data:
             logger.info("[session] Invalidated: %s", reason)
+        session_id_to_stop = self.liveavatar_session_id if stop_remote else None
+        token_to_stop = self.liveavatar_session_token if stop_remote else None
         self.liveavatar_data = None
         self.session_expires = 0.0
         self.speak_ws = None
+        self.liveavatar_session_id = None
+        self.liveavatar_session_token = None
+        if session_id_to_stop and token_to_stop:
+            asyncio.create_task(
+                _stop_liveavatar_session(session_id_to_stop, token_to_stop, reason)
+            )
 
 
 _user_sessions: dict[str, UserSession] = {}
 _user_sessions_lock: asyncio.Lock = asyncio.Lock()
 _LIVEAVATAR_SESSION_TTL: float = 1800.0  # 30 min conservative TTL
+
+
+async def _stop_liveavatar_session(session_id: str, session_token: str, reason: str) -> None:
+    """
+    Call POST /v1/sessions/stop on the LiveAvatar API to release server-side
+    WebRTC resources immediately instead of waiting for their TTL to expire.
+    Fire-and-forget — errors are logged but never surface to callers.
+    """
+    try:
+        client = _http_client
+        if client is None:
+            async with httpx.AsyncClient(timeout=10.0) as tmp:
+                r = await tmp.post(
+                    f"{LIVEAVATAR_BASE_URL}/v1/sessions/stop",
+                    headers={
+                        "Content-Type": "application/json",
+                        "accept": "application/json",
+                        "Authorization": f"Bearer {session_token}",
+                    },
+                    json={},
+                )
+                r.raise_for_status()
+        else:
+            r = await client.post(
+                f"{LIVEAVATAR_BASE_URL}/v1/sessions/stop",
+                headers={
+                    "Content-Type": "application/json",
+                    "accept": "application/json",
+                    "Authorization": f"Bearer {session_token}",
+                },
+                json={},
+            )
+            r.raise_for_status()
+        logger.info("[session] Remote stop OK — session=%s reason=%s", session_id, reason)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[session] Remote stop failed — session=%s: %s", session_id, exc)
 
 
 async def _get_or_create_user_session(sid: str) -> UserSession:
@@ -966,10 +1014,15 @@ async def _evict_idle_sessions() -> None:
                 sid for sid, e in _user_sessions.items()
                 if (now - e.last_active) > _SESSION_IDLE_TTL
             ]
+            evicted: list[UserSession] = []
             for sid in to_remove:
                 entry = _user_sessions.pop(sid)
                 if entry.ws_task and not entry.ws_task.done():
                     entry.ws_task.cancel()
+                evicted.append(entry)
+        for entry in evicted:
+            # invalidate fires _stop_liveavatar_session via asyncio.create_task
+            entry.invalidate("idle eviction", stop_remote=True)
         if to_remove:
             logger.info("[evict] Removed %d idle sessions", len(to_remove))
 
@@ -1101,6 +1154,9 @@ async def _get_or_create_liveavatar_session(entry: UserSession) -> dict[str, Any
         )
         entry.liveavatar_data = result
         entry.session_expires = now + _LIVEAVATAR_SESSION_TTL
+        # Store for remote cleanup
+        entry.liveavatar_session_id = result["session_id"]
+        entry.liveavatar_session_token = session_token
 
         # Start per-user persistent WS loop if ws_url is available
         if result["ws_url"]:
@@ -1164,6 +1220,28 @@ async def get_session(x_session_id: str = Header(default="anonymous")) -> dict[s
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Could not reach the LiveAvatar API ({type(exc).__name__}). Check network connectivity.",
         ) from exc
+
+
+@app.delete("/session", summary="Stop the LiveAvatar session and release server resources")
+async def delete_session(
+    x_session_id: str = Header(default="anonymous"),
+) -> dict[str, str]:
+    """
+    Called by the frontend on page unload (navigator.sendBeacon / fetch keepalive).
+    Cancels the WS keep-alive task, fires a remote stop on LiveAvatar, and removes
+    the session from the in-process store so the slot is immediately available.
+    """
+    sid = x_session_id if _UUID_RE.match(x_session_id) else "anonymous"
+    async with _user_sessions_lock:
+        entry = _user_sessions.pop(sid, None)
+    if entry is None:
+        return {"status": "no-session"}
+    if entry.ws_task and not entry.ws_task.done():
+        entry.ws_task.cancel()
+    # invalidate fires _stop_liveavatar_session via asyncio.create_task
+    entry.invalidate("client disconnect", stop_remote=True)
+    logger.info("[session] Deleted by client: %s", sid)
+    return {"status": "stopped"}
 
 
 @app.get("/ping", summary="Lightweight liveness probe / warmup endpoint")

@@ -8,7 +8,7 @@ import ArchitectureSection from "@/components/ArchitectureSection";
 import DesignSection from "@/components/DesignSection";
 import C4DiagramsSection from "@/components/C4DiagramsSection";
 import { Github, Mail, Linkedin, MapPin } from "lucide-react";
-import { speakText, initSessionId, ping } from "@/lib/api";
+import { speakText, initSessionId, ping, closeSession } from "@/lib/api";
 import type { LogEntry } from "@/types";
 
 const INTRO_PLAYED_KEY = "aicv_intro_played";
@@ -37,6 +37,10 @@ export default function Home() {
   useEffect(() => {
     initSessionId();
     ping();
+
+    const handleUnload = () => closeSession();
+    window.addEventListener("beforeunload", handleUnload);
+    return () => window.removeEventListener("beforeunload", handleUnload);
   }, []);
 
   const addLog = useCallback(

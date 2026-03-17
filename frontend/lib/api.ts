@@ -147,6 +147,21 @@ export async function interruptSpeech(): Promise<void> {
 }
 
 /**
+ * DELETE /session
+ * Tells the backend to stop the LiveAvatar session immediately.
+ * Uses fetch with keepalive:true so it fires even during page unload.
+ */
+export function closeSession(): void {
+  if (!sessionId || typeof window === "undefined") return;
+  // keepalive ensures the request completes even when the page is being unloaded
+  fetch(`${API_BASE_URL}/session`, {
+    method: "DELETE",
+    headers: { "X-Session-ID": sessionId },
+    keepalive: true,
+  }).catch(() => {});
+}
+
+/**
  * GET /ping
  * Lightweight warmup call — wakes a cold-started container with no side-effects.
  */
