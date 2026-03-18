@@ -1,5 +1,7 @@
 # Interactive Digital Twin CV
 
+**Live site: [dimangulov.space](https://dimangulov.space/)**
+
 A web-based interactive résumé where a photorealistic digital twin (via LiveAvatar.com WebRTC stream) answers questions about the candidate. The AI "brain" is a local LLM (Ollama) orchestrated by LangChain with a RAG pipeline backed by Qdrant.
 
 ---
