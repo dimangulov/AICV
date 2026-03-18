@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { askQuestionStream, interruptSpeech } from "@/lib/api";
+import { trackEvent, EVENTS } from "@/lib/analytics";
 import type { LogEntry, ConversationMessage, HistoryMessage } from "@/types";
 
 interface ChatInterfaceProps {
@@ -74,6 +75,7 @@ export default function ChatInterface({ onLog }: ChatInterfaceProps) {
       async (question: string) => {
         const trimmed = question.trim();
         if (!trimmed || isSubmittingRef.current) return;
+        trackEvent(EVENTS.CHAT_SENT, { input_length: trimmed.length });
         isSubmittingRef.current = true;
 
         // Interrupt avatar immediately whenever a question is submitted.

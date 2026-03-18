@@ -171,6 +171,7 @@ jobs:
           output_location: out
         env:
           NEXT_PUBLIC_API_URL:    ${{ needs.terraform-infra.outputs.backend_url }}
+          NEXT_PUBLIC_GA_MEASUREMENT_ID: ${{ vars.GA_MEASUREMENT_ID }}
           NEXT_OUTPUT:            export
           NEXT_TELEMETRY_DISABLED: 1
           PRE_BUILD_COMMAND:      npm i -g pnpm

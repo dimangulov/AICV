@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import { Loader2, Play, VideoOff, AlertTriangle, Wifi, WifiOff } from "lucide-react";
 import { getSession, resetSessionId, closeSession } from "@/lib/api";
+import { trackEvent, EVENTS } from "@/lib/analytics";
 
 type ConnectionStatus =
   | "idle"
@@ -71,6 +72,7 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
           "[Avatar] Mock mode — rendering canvas placeholder (set LIVEAVATAR_API_KEY for live avatar)",
         );
         canvasCleanupRef.current = startMockStream(videoRef);
+        trackEvent(EVENTS.VIDEO_PLAY);
         setStatus("connected");
         log("[Avatar] Mock stream active", "success");
         return;
@@ -86,6 +88,7 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
           videoRef.current
             .play()
             .catch((e: unknown) => log(`[Avatar] Autoplay blocked: ${e}`, "error"));
+          trackEvent(EVENTS.VIDEO_PLAY);
           setStatus("connected");
           log("[Avatar] Live stream connected!", "success");
         }
@@ -105,6 +108,7 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
 
       room.on(RoomEvent.Disconnected, () => {
         log("[Avatar] LiveKit room disconnected");
+        trackEvent(EVENTS.VIDEO_DISCONNECT);
         setStatus("idle");
       });
 
@@ -129,6 +133,7 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
 
         if (session.session_id === "mock-session-id") {
           canvasCleanupRef.current = startMockStream(videoRef);
+          trackEvent(EVENTS.VIDEO_PLAY);
           setStatus("connected");
           return;
         }
@@ -140,6 +145,7 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
           if (track.kind === Track.Kind.Video && videoRef.current) {
             track.attach(videoRef.current);
             videoRef.current.play().catch(() => {});
+            trackEvent(EVENTS.VIDEO_PLAY);
             setStatus("connected");
             log("[Avatar] Live stream connected!", "success");
           }
@@ -149,8 +155,7 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
           }
         });
         room.on(RoomEvent.Connected, () => { onConnected?.(); });
-        room.on(RoomEvent.Disconnected, () => { setStatus("idle"); });
-
+        room.on(RoomEvent.Disconnected, () => { trackEvent(EVENTS.VIDEO_DISCONNECT); setStatus("idle"); });
         await room.connect(session.livekit_url, session.livekit_client_token, { autoSubscribe: true });
       } catch (retryErr) {
         const retryMsg = retryErr instanceof Error ? retryErr.message : "Unknown error";
@@ -296,6 +301,7 @@ export default function VideoPlayer({ onLog, onConnected }: VideoPlayerProps) {
             canvasCleanupRef.current?.();
             canvasCleanupRef.current = null;
             if (videoRef.current) videoRef.current.srcObject = null;
+            trackEvent(EVENTS.VIDEO_DISCONNECT);
             setStatus("idle");
             log("[Avatar] Disconnected");
           }}

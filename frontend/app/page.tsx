@@ -9,6 +9,7 @@ import DesignSection from "@/components/DesignSection";
 import C4DiagramsSection from "@/components/C4DiagramsSection";
 import { Github, Mail, Linkedin, MapPin } from "lucide-react";
 import { speakText, initSessionId, ping, closeSession } from "@/lib/api";
+import { trackEvent, EVENTS } from "@/lib/analytics";
 import type { LogEntry } from "@/types";
 
 const INTRO_PLAYED_KEY = "aicv_intro_played";
@@ -88,7 +89,10 @@ export default function Home() {
           {TABS.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+              setActiveTab(tab.id);
+              trackEvent(EVENTS.TAB_VIEW, { tab_name: tab.id });
+            }}
               className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
                 activeTab === tab.id
                   ? "bg-blue-600 text-white"
