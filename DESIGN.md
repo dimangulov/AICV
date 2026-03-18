@@ -3,7 +3,7 @@
 **Version:** 2.0.0  
 **Date:** 2026-03-16  
 **Author:** Senior Full-Stack AI Engineer  
-**Status:** Proof of Concept — Phase 2 Complete  
+**Status:** Phase 2 Complete + Phase 3 (rate limiting) ✅  
 
 ---
 
@@ -92,7 +92,7 @@ The C4 diagrams are authored in `c4/workspace.dsl` using the [Structurizr DSL](h
 |--------|------|-------|
 | Ollama | Local LLM runtime | llama3.2 + nomic-embed-text; no data leaves the machine |
 | Azure OpenAI | Cloud LLM + embeddings | gpt-4o-mini + text-embedding-3-small; activated via `LLM_PROVIDER=azure_openai` |
-| Azure Speech Services | Text-to-Speech REST API | Neural voices (en-US-GuyNeural default); gTTS fallback when key absent |
+| Azure Speech Services | Text-to-Speech REST API | Neural voices (en-US-AndrewMultilingualNeural default); gTTS fallback when key absent |
 | LiveAvatar.com | Photorealistic avatar WebRTC stream | Requires API key; provides the visual face; mock mode available |
 | Browser Web Speech API | Speech-to-Text | Client-side only; Chrome/Edge |
 
@@ -167,8 +167,16 @@ The C4 diagrams are authored in `c4/workspace.dsl` using the [Structurizr DSL](h
 │                                                                           │
 │   Shared Libraries:                                                       │
 │   • lib/api.ts          — typed fetch wrappers for /ask, /ask/stream     │
+│   •                       sessionId persisted in localStorage             │
+│   •                       key: aicv_session_id (reset on stale session)  │
 │   • hooks/useSpeechRecognition.ts  — webkitSpeechRecognition hook        │
 │   • types/index.ts      — shared TypeScript interfaces                   │
+│                                                                           │
+│   localStorage Keys:                                                      │
+│   • aicv_session_id   — avatar session UUID; created on first visit,     │
+│                          reset and retried on LiveAvatar connect failure  │
+│   • aicv_intro_played — set to "1" after first intro video plays;       │
+│                          returning visitors skip intro and start mic      │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -202,7 +210,7 @@ The C4 diagrams are authored in `c4/workspace.dsl` using the [Structurizr DSL](h
 │   │                                                           │   │
 │   │  _synthesize_pcm_azure()   ← AZURE_SPEECH_KEY present    │   │
 │   │    POST tts.speech.microsoft.com/cognitiveservices/v1     │   │
-│   │    SSML · voice: LIVEAVATAR_VOICE (en-US-GuyNeural)       │   │
+│   │    SSML · voice: LIVEAVATAR_VOICE (en-US-AndrewMultilingualNeural) │   │
 │   │                                                           │   │
 │   │  _synthesize_pcm_gtts()    ← fallback (no speech key)    │   │
 │   │    gTTS → MP3 → pydub → PCM 16-bit / 16 kHz mono         │   │
@@ -347,7 +355,7 @@ _synthesize_pcm(sentence):
         POST https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com
              /cognitiveservices/v1
         Headers: Ocp-Apim-Subscription-Key, X-Microsoft-OutputFormat: raw-16khz-16bit-mono-pcm
-        Body: SSML with voice = LIVEAVATAR_VOICE (default: en-US-GuyNeural)
+        Body: SSML with voice = LIVEAVATAR_VOICE (default: en-US-AndrewMultilingualNeural)
         → returns raw PCM bytes
 
     else (fallback):
@@ -660,7 +668,7 @@ Browser          FastAPI            LiveAvatar.com
 | XSS via SVG injection | Low | SVGs are statically exported from controlled DSL; served from `public/`; no user-supplied SVG path accepted |
 | XSS via dangerouslySetInnerHTML | Low | Only used in `DiagramViewer` for static self-hosted SVG files; no external or user-supplied content |
 | CORS abuse | Low | `ALLOWED_ORIGINS` env var, defaults to `localhost:3000` only |
-| Excessive inference calls | Low | Add `slowapi` rate limiter (10 req/min per IP) — Phase 3 |
+| Excessive inference calls | Low | `SlowAPIMiddleware` rate limiter — 20 req/min per IP (**implemented**) |
 
 ### 8.2 Secrets Management
 
@@ -756,7 +764,7 @@ Content-Security-Policy: default-src 'self';
 │  │             ┌──────────▼────────┐                               │    │
 │  │             │  Azure Speech     │                               │    │
 │  │             │  Services         │                               │    │
-│  │             │  (westeurope)     │                               │    │
+│  │             │  (northeurope)    │                               │    │
 │  │             │  kind: Speech     │                               │    │
 │  │             │  sku: F0 (free)   │                               │    │
 │  │             └───────────────────┘                               │    │
@@ -785,7 +793,7 @@ External (SaaS):
 | Embedding model | `nomic-embed-text` (Ollama, 768-dim) | `text-embedding-3-small` (GlobalStandard, 1536-dim) |
 | `QDRANT_MODE` | `memory` or `docker` | `cloud` |
 | Vector DB | In-memory / Docker Qdrant | Qdrant Cloud (free tier) |
-| TTS | gTTS fallback | Azure Speech (en-US-GuyNeural) |
+| TTS | gTTS fallback | Azure Speech (en-US-AndrewMultilingualNeural) |
 | Authentication | API keys in `.env` | Managed Identity (no stored secrets) |
 | Frontend | `pnpm dev` (SSR) | Azure SWA Free (static export) |
 | Backend | `uvicorn --reload` | Container Apps (scales to 0, `enable_container_apps=true`) |
@@ -866,7 +874,7 @@ terraform output -raw static_web_app_api_key
 | Secrets | Container App secrets + env | Azure Key Vault references |
 | Auth | Managed Identity | Managed Identity + Key Vault RBAC |
 | Observability | Log Analytics | OpenTelemetry → Application Insights |
-| Rate limiting | Not implemented | `slowapi` 10 req/min/IP |
+| Rate limiting | **Implemented** | `slowapi` 20 req/min/IP (`SlowAPIMiddleware`) |
 | CDN | SWA built-in | Azure Front Door (global WAF) |
 | Scale | 0–3 replicas | KEDA HTTP scaler, 0–10 replicas |
 | LLM caching | None | Redis Cache — Azure Cache for Redis Basic (~$16/mo) |
@@ -892,7 +900,7 @@ terraform output -raw static_web_app_api_key
 | STT | Web Speech API | Zero setup, browser-native, no API cost for POC |
 | TTS (primary) | Azure Speech REST API | High-quality neural voices; low latency; same Azure subscription |
 | TTS (fallback) | gTTS + pydub | Zero-cost local fallback when `AZURE_SPEECH_KEY` absent |
-| TTS voice | en-US-GuyNeural | Configurable via `LIVEAVATAR_VOICE` env var |
+| TTS voice | en-US-AndrewMultilingualNeural | Configurable via `LIVEAVATAR_VOICE` env var |
 | Streaming | Server-Sent Events (SSE) | Simple, HTTP-native, automatic reconnect; no WS overhead |
 | C4 Diagramming | Structurizr DSL + CLI | Version-controlled DSL, reproducible SVG export via Docker |
 | SVG Viewer | DiagramViewer (custom) | Inline SVG, pointer-events pan, non-passive wheel zoom-to-cursor |
@@ -925,11 +933,15 @@ terraform output -raw static_web_app_api_key
 - [x] Terraform IaC: Azure OpenAI, Azure Speech, Container Apps, SWA, ACR, Log Analytics
 - [x] GitHub Actions CI/CD: Terraform → Docker build → Container App deploy → SWA deploy
 - [x] `enable_container_apps` Terraform flag for quota-safe provisioning
+- [x] Custom domain `dimangulov.space` via Azure SWA + GoDaddy DNS
+- [x] `localStorage` session persistence (`aicv_session_id`); auto-reset on stale connection
+- [x] Intro video plays once per browser (`aicv_intro_played`); returning visitors skip to mic
+- [x] Rate limiting: `SlowAPIMiddleware` 20 req/min per IP
 
 ### Phase 3 — Production
 - [ ] Structured JSON CV with semantic section chunking
 - [ ] Multi-language support (EN / UA / DE)
-- [ ] Rate limiting with `slowapi` (10 req/min per IP)
+- [x] Rate limiting with `slowapi` (20 req/min per IP)
 - [ ] Redis caching for frequently asked questions
 - [ ] Analytics dashboard — question frequency, latency percentiles
 - [ ] Azure Key Vault for secrets management
