@@ -578,7 +578,7 @@ interface SessionResponse {
 
 ```python
 Document(
-    page_content="I am Damir Imangulov, a Principal Architect with 15+ years...",
+    page_content="I am Damir Imangulov, a Principal Architect with 10+ years...",
     metadata={"source": "./bio.txt"}
 )
 ```

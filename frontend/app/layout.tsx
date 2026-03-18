@@ -14,11 +14,11 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Damir Imangulov — Interactive Digital Twin CV",
   description:
-    "Principal Architect with 15+ years experience. Ask my AI digital twin anything about my background, projects, and technical expertise.",
+    "Principal Architect with 10+ years experience. Ask my AI digital twin anything about my background, projects, and technical expertise.",
   openGraph: {
     title: "Damir Imangulov — Interactive Digital Twin CV",
     description:
-      "Principal Architect with 15+ years experience. Ask my AI digital twin anything.",
+      "Principal Architect with 10+ years experience. Ask my AI digital twin anything.",
     type: "website",
   },
 };
