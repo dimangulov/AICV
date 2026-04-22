@@ -72,16 +72,36 @@
 
 ## Traceability
 
-(To be populated by roadmapper — maps each REQ-ID to a Phase.)
+| REQ-ID | Phase | Status |
+|--------|-------|--------|
+| INFRA-01 | Phase 1 | Pending |
+| INFRA-02 | Phase 1 | Pending |
+| INFRA-03 | Phase 1 | Pending |
+| INFRA-04 | Phase 1 | Pending |
+| INFRA-05 | Phase 1 | Pending |
+| INFRA-06 | Phase 1 | Pending |
+| INFRA-07 | Phase 1 | Pending |
+| CONFIG-01 | Phase 1 | Pending |
+| CONFIG-02 | Phase 1 | Pending |
+| CONFIG-03 | Phase 1 | Pending |
+| SMOKE-01 | Phase 1 | Pending |
+| SMOKE-02 | Phase 1 | Pending |
+| SMOKE-03 | Phase 1 | Pending |
+| SMOKE-04 | Phase 1 | Pending |
+| DEPLOY-01 | Phase 2 | Pending |
+| DEPLOY-02 | Phase 2 | Pending |
+| UI-01 | Phase 3 | Pending |
+| UI-02 | Phase 3 | Pending |
+| UI-03 | Phase 3 | Pending |
+| UI-04 | Phase 3 | Pending |
+| UI-05 | Phase 3 | Pending |
+| UI-06 | Phase 3 | Pending |
+| DEPLOY-03 | Phase 3 | Pending |
+| DEPLOY-04 | Phase 3 | Pending |
+| DEPLOY-05 | Phase 3 | Pending |
 
-| REQ-ID | Phase | Notes |
-|--------|-------|-------|
-| INFRA-01…07 | — | Pending roadmap |
-| CONFIG-01…03 | — | Pending roadmap |
-| SMOKE-01…04 | — | Pending roadmap |
-| UI-01…06 | — | Pending roadmap |
-| DEPLOY-01…05 | — | Pending roadmap |
+**Coverage:** 25/25 v1 requirements mapped. No orphans, no duplicates.
 
 ---
 
-*Last updated: 2026-04-22*
+*Last updated: 2026-04-22 — traceability populated by roadmapper*
