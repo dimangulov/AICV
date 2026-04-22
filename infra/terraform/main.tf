@@ -267,6 +267,14 @@ resource "azurerm_container_app" "backend" {
         name  = "LIVEAVATAR_AVATAR_ID"
         value = var.live_avatar_avatar_id
       }
+      env {
+        name  = "LIVEAVATAR_IS_SANDBOX"
+        value = tostring(var.live_avatar_is_sandbox)
+      }
+      env {
+        name  = "LIVEAVATAR_SESSION_MODE"
+        value = var.live_avatar_session_mode
+      }
 
       # ── CORS: restrict to the custom domain origin ────────────────────────────
       env {
