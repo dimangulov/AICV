@@ -396,3 +396,10 @@ On **Azure Container Apps**, `AZURE_OPENAI_API_KEY` is intentionally left empty 
 | Avatar Stream | LiveAvatar.com WebRTC |
 | Speech Input | Web Speech API (client-side) |
 | Infrastructure | Docker Compose |
+
+---
+
+## Operations
+
+Rollback procedure, Phase 2 key-rotation procedure, and the sandbox-behavior
+baseline: see [docs/rollback.md](./docs/rollback.md).
