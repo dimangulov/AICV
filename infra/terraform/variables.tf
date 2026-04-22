@@ -67,6 +67,22 @@ variable "live_avatar_avatar_id" {
   }
 }
 
+variable "live_avatar_is_sandbox" {
+  description = "LiveAvatar sandbox mode flag (free tier). Set via TF_VAR_live_avatar_is_sandbox or LIVE_AVATAR_IS_SANDBOX GitHub Actions variable."
+  type        = bool
+  default     = true
+}
+
+variable "live_avatar_session_mode" {
+  description = "LiveAvatar session mode. Set via TF_VAR_live_avatar_session_mode or LIVE_AVATAR_SESSION_MODE GitHub Actions variable."
+  type        = string
+  default     = "LITE"
+  validation {
+    condition     = contains(["LITE", "FULL", "CUSTOM"], var.live_avatar_session_mode)
+    error_message = "live_avatar_session_mode must be one of: LITE, FULL, CUSTOM."
+  }
+}
+
 variable "enable_container_apps" {
   description = "Deploy the Container Apps Environment and backend Container App. Set false to skip (saves cost during development)."
   type        = bool

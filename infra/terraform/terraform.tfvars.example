@@ -7,6 +7,8 @@ resource_group_name   = "rg-aicv-prod"
 location              = "northeurope"
 openai_location       = "swedencentral"
 live_avatar_avatar_id = "default"
+live_avatar_is_sandbox   = true
+live_avatar_session_mode = "LITE"
 
 # ── Sensitive variables ────────────────────────────────────────────────────────
 # Uncomment for local testing only. In CI, inject as TF_VAR_* secrets instead.
