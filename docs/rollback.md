@@ -126,23 +126,57 @@ Procedure (execute only when Phase 2 begins — do NOT execute during Phase 1):
 
 ---
 
-## Sandbox Behavior Baseline (observed YYYY-MM-DD)
+## Sandbox Behavior Baseline (observed 2026-04-22)
 
-> **Status:** Pending operator smoke run — replace this block verbatim with
-> the paste-ready output from `python scripts/smoke-liveavatar.py` once the
-> operator has executed it per the Plan 02 checkpoint (see
-> `.planning/phases/01-infra-wiring-local-smoke-test/01-02-SUMMARY.md` §
-> "Task 2 Status — Awaiting Operator Action"). Do NOT edit the script
-> output; paste it verbatim between the markers below.
+> **Source:** verbatim output of `python scripts/smoke-liveavatar.py --base-url http://localhost:8001`
+> executed 2026-04-22 against a local FastAPI backend with the sandbox env
+> configured (`LIVEAVATAR_IS_SANDBOX=true`, `LIVEAVATAR_SESSION_MODE=LITE`,
+> `LIVEAVATAR_AVATAR_ID=dd73ea75-1218-4ef3-92ce-606d5f7fbc0a`, existing paid
+> API key per decision `D-08`). Do NOT edit the block below.
 
 <!-- BASELINE-PLACEHOLDER-START -->
-_No baseline observations yet. See Plan 02 checkpoint in_
-_`.planning/phases/01-infra-wiring-local-smoke-test/01-02-SUMMARY.md` for_
-_operator instructions. Once the operator runs_
-_`python scripts/smoke-liveavatar.py` against a local backend with the_
-_sandbox env configured, the emitted `## Sandbox Behavior Baseline_
-_(observed YYYY-MM-DD)` markdown block replaces this placeholder verbatim._
+```
+## Sandbox Behavior Baseline (observed 2026-04-22)
+
+Backend: http://localhost:8001
+Config: LIVEAVATAR_IS_SANDBOX=true, LIVEAVATAR_SESSION_MODE=LITE,
+        LIVEAVATAR_AVATAR_ID=dd73ea75-1218-4ef3-92ce-606d5f7fbc0a,
+        API key: existing paid key (per Phase 1 decision D-08)
+
+| ID       | Status   | Summary |
+|----------|----------|---------|
+| SMOKE-01 | PASS     | /session returned 200 in 2235 ms with session_id |
+| SMOKE-02 | OBSERVED | ws_url present in LITE sandbox — full TTS path works |
+| SMOKE-03 | OBSERVED | speak: queued; interrupt: interrupted; post-cap reconnect: 200 |
+| SMOKE-04 | OBSERVED | unexpected pattern: statuses=[502,502] |
+
+Elapsed: 139.5 s
+```
 <!-- BASELINE-PLACEHOLDER-END -->
+
+### Interpretation (operator notes, 2026-04-22)
+
+- **SMOKE-01 PASS** — the paid LiveAvatar API key accepts `is_sandbox=true`
+  at the provider. Decision `D-10` risk (a) "paid key rejects is_sandbox" is
+  ruled out for this account. `CONFIG-02` (free-tier key rotation, deferred
+  to Phase 2) remains the clean-state ownership transition; it is NOT a
+  Phase 1 blocker.
+- **SMOKE-02 `ws_url` PRESENT** — the sandbox LITE endpoint returned a
+  `ws_url` on `/v1/sessions/start`, so the persistent WS speech pump
+  operates on the same code path as paid LITE. The documented
+  "avatar visible, no TTS push" fallback is not triggered in this
+  configuration.
+- **SMOKE-03 OBSERVED** — `/speak` returned `queued`, `/interrupt` returned
+  `interrupted`, and a fresh session (new `X-Session-ID` UUID) reconnects
+  with HTTP 200 after the ~130 s cap window elapses. End-to-end Q&A flow
+  is healthy under sandbox.
+- **SMOKE-04 OBSERVED `statuses=[502,502]`** — two parallel `/session`
+  probes both received HTTP 502. This is consistent with LiveAvatar's
+  sandbox single-slot concurrency constraint: the provider rejects the
+  second concurrent session attempt upstream, and the backend surfaces the
+  provider's failure as a bad-gateway error. Pitfall `#3` (sandbox
+  concurrency limits) is confirmed — production should expect sequential,
+  not parallel, sandbox sessions per backend instance.
 
 **Source of truth:** `.planning/phases/01-infra-wiring-local-smoke-test/01-02-SUMMARY.md`.
 Research file `.planning/research/PITFALLS.md` is NOT mutated — this
