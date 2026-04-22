@@ -34,10 +34,16 @@ The public site currently uses a paid LiveAvatar plan with a custom avatar repre
 
 ### What must be delivered
 
-1. **Swap credentials/config** — reconfigure the deployed backend to use the free LiveAvatar tier (likely `LIVEAVATAR_IS_SANDBOX=true` and a non-custom `LIVEAVATAR_AVATAR_ID`, or a free-tier API key). Verify the existing backend code supports this without source changes.
+1. **Config already set by user** (2026-04-22):
+   - `LIVEAVATAR_IS_SANDBOX=true` added to GitHub environment variables
+   - `LIVEAVATAR_AVATAR_ID=dd73ea75-1218-4ef3-92ce-606d5f7fbc0a` set in GitHub environment variables (replacing the paid custom avatar ID)
+   - Code path verified: `backend/avatar.py:275` sends `is_sandbox: LIVEAVATAR_IS_SANDBOX` in the POST `/v1/sessions/token` payload — no backend code change required for the switch itself
+   - Still to verify: Terraform variable wiring for `LIVEAVATAR_IS_SANDBOX` and the new `LIVEAVATAR_AVATAR_ID` (values must flow GitHub secret/var → Terraform → Container App env at deploy time)
+
 2. **UI disclaimer** — add a clearly-visible note on the site stating:
    - The avatar does **not** represent the actual author
    - The site uses LiveAvatar's **free** version
+
 3. **Deploy to production** — push through the existing GitHub Actions pipeline; verify the live site at `dimangulov.space` shows the new avatar and disclaimer.
 
 ### Out of scope for this milestone
@@ -68,9 +74,12 @@ The public site currently uses a paid LiveAvatar plan with a custom avatar repre
 
 ### Active (this milestone)
 
-- [ ] Investigate LiveAvatar free/sandbox tier capabilities and required config (API key type, avatar ID, `LIVEAVATAR_IS_SANDBOX` flag, session modes)
-- [ ] Configure deployed backend to use free-tier credentials (env vars in Terraform/Container App)
+- [x] GitHub env vars set by user: `LIVEAVATAR_IS_SANDBOX=true`, `LIVEAVATAR_AVATAR_ID=dd73ea75-1218-4ef3-92ce-606d5f7fbc0a`
+- [x] Code path verified: `backend/avatar.py:275` already sends `is_sandbox` to LiveAvatar `/v1/sessions/token`
+- [ ] Verify Terraform + deploy pipeline propagate `LIVEAVATAR_IS_SANDBOX` and the new `LIVEAVATAR_AVATAR_ID` from GitHub env into Container App env at runtime (currently `LIVEAVATAR_IS_SANDBOX` may not be declared as a Terraform variable or wired through `.github/workflows/deploy-azure.yml`)
+- [ ] Confirm free-tier behavior end-to-end against the live API (session start succeeds, WebSocket streams, latency acceptable)
 - [ ] Add disclaimer notice on the frontend page: avatar is not the author's likeness and LiveAvatar free tier is in use
+- [ ] Invalidate stale `aicv_session_id` / intro-cache for returning visitors so the new avatar renders immediately
 - [ ] Deploy to production and verify the live site renders the new avatar and disclaimer
 
 ### Out of Scope
@@ -86,7 +95,8 @@ The public site currently uses a paid LiveAvatar plan with a custom avatar repre
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
 | Stay on LiveAvatar (switch tier, not provider) | Existing WebSocket/WebRTC integration works; minimize churn | Pending |
-| Minimize backend code changes | Existing `backend/avatar.py` already supports `LIVEAVATAR_IS_SANDBOX` flag — prefer config-only swap | Pending — verify free tier works with current code path |
+| Minimize backend code changes | Existing `backend/avatar.py` already supports `LIVEAVATAR_IS_SANDBOX` flag — prefer config-only swap | Validated — `avatar.py:275` sends `is_sandbox` to `/v1/sessions/token`; no backend code change needed for the flag itself |
+| New sandbox avatar ID | User provided `dd73ea75-1218-4ef3-92ce-606d5f7fbc0a` as the free-tier avatar replacing the paid custom one | Set in GitHub env vars 2026-04-22 |
 | Disclaimer on main page (visible, not buried) | Users must immediately understand the avatar ≠ author and the tier is free | Pending — placement TBD during planning |
 
 ---
