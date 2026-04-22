@@ -26,7 +26,10 @@
   3. Local backend run with the free-tier key + sandbox config successfully calls `POST /v1/sessions/token` (HTTP 200 with `session_id` + `session_token`) and `POST /v1/sessions/start` — `ws_url` presence documented either way.
   4. Local end-to-end Q&A flow works — ask a question, hear avatar respond, confirm clean reconnect after the ~60-120 s sandbox cap; concurrent-session behavior observed and recorded.
   5. Rollback runbook committed (flip `LIVE_AVATAR_IS_SANDBOX` GitHub Variable to `false` → rerun workflow) — discoverable in README or dedicated `docs/rollback.md`.
-**Plans**: TBD
+**Plans**: 3 plans
+  - [ ] 01-01-PLAN.md — Terraform + workflow wiring (INFRA-01 to INFRA-07)
+  - [ ] 01-02-PLAN.md — Smoke test tooling (SMOKE-01 to SMOKE-04)
+  - [ ] 01-03-PLAN.md — Rollback runbook + CONFIG verification (CONFIG-01, CONFIG-02 deferral, CONFIG-03)
 
 ### Phase 2: Stage 1 Deploy — Backend Tier Swap
 **Goal**: Production `dimangulov.space` runs on the free sandbox tier, rendering the Wayne avatar with zero LiveAvatar credits consumed per session.
@@ -58,7 +61,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Infra Wiring + Local Smoke Test | 0/? | Not started | - |
+| 1. Infra Wiring + Local Smoke Test | 0/3 | Plans created | - |
 | 2. Stage 1 Deploy — Backend Tier Swap | 0/? | Not started | - |
 | 3. Stage 2 Deploy — Disclosure UI + Intro Rewrite + Key Revocation | 0/? | Not started | - |
 
