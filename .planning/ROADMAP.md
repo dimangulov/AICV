@@ -8,7 +8,7 @@
 
 ## Phases
 
-- [ ] **Phase 1: Infra Wiring + Local Smoke Test** — Close the 3-point Terraform/workflow wiring gap and prove sandbox credentials work locally before any production deploy.
+- [x] **Phase 1: Infra Wiring + Local Smoke Test** — Close the 3-point Terraform/workflow wiring gap and prove sandbox credentials work locally before any production deploy. (completed 2026-04-22)
 - [ ] **Phase 2: Stage 1 Deploy — Backend Tier Swap** — Ship the config change to production via existing 4-job pipeline and verify the Wayne sandbox avatar renders live with zero credit consumption.
 - [ ] **Phase 3: Stage 2 Deploy — Disclosure UI + Intro Rewrite + Key Revocation** — Ship the persistent disclaimer, third-person intro, cache-bust, and revoke the paid API key after Stage 2 is healthy.
 
@@ -27,9 +27,9 @@
   4. Local end-to-end Q&A flow works — ask a question, hear avatar respond, confirm clean reconnect after the ~60-120 s sandbox cap; concurrent-session behavior observed and recorded.
   5. Rollback runbook committed (flip `LIVE_AVATAR_IS_SANDBOX` GitHub Variable to `false` → rerun workflow) — discoverable in README or dedicated `docs/rollback.md`.
 **Plans**: 3 plans
-  - [ ] 01-01-PLAN.md — Terraform + workflow wiring (INFRA-01 to INFRA-07)
-  - [ ] 01-02-PLAN.md — Smoke test tooling (SMOKE-01 to SMOKE-04)
-  - [ ] 01-03-PLAN.md — Rollback runbook + CONFIG verification (CONFIG-01, CONFIG-02 deferral, CONFIG-03)
+  - [x] 01-01-PLAN.md — Terraform + workflow wiring (INFRA-01 to INFRA-07)
+  - [x] 01-02-PLAN.md — Smoke test tooling (SMOKE-01 to SMOKE-04)
+  - [x] 01-03-PLAN.md — Rollback runbook + CONFIG verification (CONFIG-01, CONFIG-02 deferral, CONFIG-03)
 
 ### Phase 2: Stage 1 Deploy — Backend Tier Swap
 **Goal**: Production `dimangulov.space` runs on the free sandbox tier, rendering the Wayne avatar with zero LiveAvatar credits consumed per session.
@@ -61,7 +61,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Infra Wiring + Local Smoke Test | 0/3 | Plans created | - |
+| 1. Infra Wiring + Local Smoke Test | 3/3 | Complete   | 2026-04-22 |
 | 2. Stage 1 Deploy — Backend Tier Swap | 0/? | Not started | - |
 | 3. Stage 2 Deploy — Disclosure UI + Intro Rewrite + Key Revocation | 0/? | Not started | - |
 

@@ -76,7 +76,12 @@ The public site currently uses a paid LiveAvatar plan with a custom avatar repre
 
 - [x] GitHub env vars set by user: `LIVEAVATAR_IS_SANDBOX=true`, `LIVEAVATAR_AVATAR_ID=dd73ea75-1218-4ef3-92ce-606d5f7fbc0a`
 - [x] Code path verified: `backend/avatar.py:275` already sends `is_sandbox` to LiveAvatar `/v1/sessions/token`
-- [ ] Verify Terraform + deploy pipeline propagate `LIVEAVATAR_IS_SANDBOX` and the new `LIVEAVATAR_AVATAR_ID` from GitHub env into Container App env at runtime (currently `LIVEAVATAR_IS_SANDBOX` may not be declared as a Terraform variable or wired through `.github/workflows/deploy-azure.yml`)
+- [ ] **Wire `LIVEAVATAR_IS_SANDBOX` end-to-end — CONFIRMED GAP.** The flag is read correctly in `backend/config.py:60` and applied at `backend/avatar.py:275`, but the deploy pipeline does **not** propagate it:
+  - `infra/terraform/variables.tf` — no `live_avatar_is_sandbox` variable declared
+  - `infra/terraform/main.tf:262-269` Container App env block — no `LIVEAVATAR_IS_SANDBOX` env entry
+  - `.github/workflows/deploy-azure.yml:67-74` — no `TF_VAR_live_avatar_is_sandbox` passed to Terraform
+  → In production today `LIVEAVATAR_IS_SANDBOX` defaults to `false` regardless of GitHub env vars, so sandbox credits are NOT being used even though the sandbox `avatar_id` is already set. Fix: mirror the `live_avatar_avatar_id` pattern — add TF variable, add `main.tf` env block, add `TF_VAR_live_avatar_is_sandbox` workflow step reading `vars.LIVE_AVATAR_IS_SANDBOX`.
+- [ ] Confirm `LIVEAVATAR_AVATAR_ID` wiring is sufficient (Terraform default already matches the new sandbox UUID `dd73ea75-1218-4ef3-92ce-606d5f7fbc0a`; GitHub var `LIVE_AVATAR_AVATAR_ID` overrides it)
 - [ ] Confirm free-tier behavior end-to-end against the live API (session start succeeds, WebSocket streams, latency acceptable)
 - [ ] Add disclaimer notice on the frontend page: avatar is not the author's likeness and LiveAvatar free tier is in use
 - [ ] Invalidate stale `aicv_session_id` / intro-cache for returning visitors so the new avatar renders immediately
